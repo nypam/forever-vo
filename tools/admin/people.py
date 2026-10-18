@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from tools.admin.lines import Line, items, line_key, voiced
+from tools.admin.lines import Line, as_int, items, line_key, voiced
 from tools.admin.texts import Texts
 from tools.config import Config
 from tools.wowdata import base_voice, is_archetype
@@ -49,12 +49,7 @@ class VoiceInfo:
 
 
 def integer(value: Any) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        return value
-    text = str(value or "")
-    return int(text) if text.lstrip("-").isdigit() else None
+    return as_int(value)
 
 
 def npcs_of(
@@ -131,6 +126,13 @@ def fallback_chain(name: str, fallbacks: dict[str, str]) -> list[str]:
         current = candidate
 
 
+def fallback_voice(name: str, fallbacks: dict[str, str]) -> bool:
+    """A voice nothing uses yet but generation could cast: <race>-<male|female>,
+    optionally with an archetype, for a race that borrows another's clip."""
+    parts = name.split("-")
+    return len(parts) >= 2 and parts[0] in fallbacks and parts[1] in ("male", "female")
+
+
 def voice_info(name: str, config: Config, lines: list[Line]) -> VoiceInfo | None:
     """Everything the config says about a voice, and who uses it; None for a
     name nothing uses and the config does not know."""
@@ -147,7 +149,7 @@ def voice_info(name: str, config: Config, lines: list[Line]) -> VoiceInfo | None
     pinned = sorted(key for key, voice in voices.speakers.items() if voice == name)
     chain = fallback_chain(name, voices.fallbacks)
     known = rows or tuning or name in voices.sources or pinned
-    if not known and name.split("-")[0] not in voices.fallbacks:
+    if not known and not fallback_voice(name, voices.fallbacks):
         return None
     source, borrowed_from = voices.sources.get(name), None
     if source is None:

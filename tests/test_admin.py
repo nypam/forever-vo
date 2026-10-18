@@ -976,6 +976,13 @@ def test_voice_info_own_and_borrowed():
     assert archetype is not None and archetype.fallbacks[:1] == ["human-male"]
     assert archetype.rows == 2 and archetype.pick == []
     assert voice_info("no-such-voice", cfg, people_rows()) is None
+    assert (
+        voice_info("felorc-banana", cfg, people_rows()) is None
+    )  # a race key alone is not a voice
+    assert voice_info("felorc", cfg, people_rows()) is None
+    assert voice_info("felorc-female-grunt", cfg, people_rows()) is not None
+    unusual = [line("q:30:accept", speaker=1234, voice="npc-1234")]
+    assert voice_info("npc-1234", cfg, unusual) is not None  # an NPC's own clip, in use
 
 
 def test_voice_info_fallback_cycle():
@@ -1257,7 +1264,12 @@ def npc_client(tmp_path: Path, *, display: bool):
         tmp_path / "data", capture={"quests": {}, "gossip": {}, "npcs": {"197": record}}
     )
     config = Config(
-        voices=Voices(sources={"human-male-official": VoiceSources(clips=[540633])}),
+        voices=Voices(
+            sources={
+                "human-male-official": VoiceSources(clips=[540633]),
+                "orc-male": VoiceSources(clips=[1], build="1.60.1.69977"),
+            }
+        ),
         tts=Tts(voices={"human-male-official": VoiceTuning(cfg_weight=0.3)}),
     )
     catalog = build_catalog(tmp_path / "addons", None, tmp_path / "data")
@@ -1294,6 +1306,11 @@ def test_npc_page_object_and_unknown(wago, tmp_path):
     )
     assert c.get("/npc/424242").status_code == 404
     assert c.get("/npc/abc").status_code == 404
+    for odd in ("--5", "²", "5-"):  # isdigit() is true for "²", int() is not
+        assert c.get(f"/npc/{odd}").status_code == 404, odd
+    for typed in ("--5", "²"):  # the NPC box is typed into
+        assert c.get("/lines", params={"npc": typed}).status_code == 200, typed
+        assert c.get("/api/lines", params={"npc": typed}).status_code == 200, typed
 
 
 def test_npc_page_offline(offline, tmp_path):
@@ -1309,6 +1326,15 @@ def test_clip_route(wago, tmp_path):
     assert c.get("/clip/900.ogg?build=1.60.1.69977").status_code == 200
     assert c.get("/clip/900.ogg?build=../x").status_code == 404
     assert c.get("/clip/abc.ogg").status_code == 404
+    for build in (
+        "..",
+        ".",
+        "1.2%0A",
+        "9.9.9.1",
+    ):  # outside the cache, or a build nobody picked
+        assert c.get(f"/clip/900.ogg?build={build}").status_code == 404, build
+    assert c.get("/clip/².ogg").status_code == 404
+    assert all(".." not in str(dest) for _, dest, _ in wago)
 
 
 def test_voice_page_names(wago, tmp_path):
@@ -1320,7 +1346,13 @@ def test_voice_page_names(wago, tmp_path):
     )
     assert 'href="/npc/197"' in page.text
     assert c.get("/voice/narrator").status_code == 200
-    for bad in ["/voice/..%2Fx", "/voice/no-such-voice", "/voice/%20"]:
+    for bad in [
+        "/voice/..%2Fx",
+        "/voice/no-such-voice",
+        "/voice/%20",
+        "/voice/felorc-banana",
+        "/voice/felorc",
+    ]:
         assert c.get(bad).status_code == 404, bad
 
 

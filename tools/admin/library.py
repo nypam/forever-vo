@@ -9,13 +9,12 @@ would have, so a comparison take for it still pairs by name.
 
 from __future__ import annotations
 
-from tools.admin.lines import Line, line_key, natural
+from tools.admin.lines import Line, as_int, line_key, natural
 from tools.admin.texts import Texts
 
 
 def speaker_of(entry: dict) -> int | None:
-    npc = str(entry.get("npc") or "")
-    return int(npc) if npc.lstrip("-").isdigit() else None
+    return as_int(entry.get("npc"))
 
 
 def known_lines(texts: Texts) -> list[Line]:
@@ -23,14 +22,15 @@ def known_lines(texts: Texts) -> list[Line]:
     out = []
     for key, entry in texts.quests.items():
         quest, _, event = key.partition("-")
-        if not quest.isdigit() or event not in ("accept", "progress", "complete"):
+        quest_id = as_int(quest)
+        if quest_id is None or event not in ("accept", "progress", "complete"):
             continue
         out.append(
             Line(
                 id=f"q:{quest}:{event}",
                 kind=event,
                 variant="",
-                quest_id=int(quest),
+                quest_id=quest_id,
                 speaker=speaker_of(entry),
                 voice=None,
                 duration=None,
@@ -42,7 +42,8 @@ def known_lines(texts: Texts) -> list[Line]:
         )
     for key, entry in texts.gossip.items():
         speaker, _, digest = key.partition("|")
-        if not speaker.lstrip("-").isdigit() or not digest:
+        speaker_key = as_int(speaker)
+        if speaker_key is None or not digest:
             continue
         out.append(
             Line(
@@ -50,7 +51,7 @@ def known_lines(texts: Texts) -> list[Line]:
                 kind="gossip",
                 variant="",
                 quest_id=None,
-                speaker=int(speaker),
+                speaker=speaker_key,
                 voice=None,
                 duration=None,
                 path=f"Gossip/{speaker}-{digest}.mp3",

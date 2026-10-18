@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode
 
-from tools.admin.lines import Line, is_variant, line_key, voiced
+from tools.admin.lines import Line, as_int, is_variant, line_key, voiced
 from tools.admin.packs import Pack
 from tools.admin.texts import Texts
 
@@ -167,8 +167,8 @@ class Catalog:
             return False
         if f.npc:
             npc = f.npc.strip()
-            if npc.lstrip("-").isdigit():
-                if line.speaker != int(npc):
+            if (speaker := as_int(npc)) is not None:
+                if line.speaker != speaker:
                     return False
             elif npc.lower() not in (line.speaker_name or "").lower():
                 return False

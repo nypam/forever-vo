@@ -45,6 +45,19 @@ class Line:
 
 
 GENDER_LABELS = ("male", "female")
+WHOLE_NUMBER = re.compile(r"-?[0-9]+")
+
+
+def as_int(text: object) -> int | None:
+    """An integer written in ASCII digits, optionally negative ("-5", "197"), else
+    None. str.isdigit() also accepts "²" and lstrip("-") accepts "--5", both of
+    which int() refuses."""
+    if isinstance(text, bool):
+        return None
+    if isinstance(text, int):
+        return text
+    value = str(text if text is not None else "").strip()
+    return int(value) if WHOLE_NUMBER.fullmatch(value) else None
 
 
 def is_variant(line: Line) -> bool:

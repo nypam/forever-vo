@@ -34,7 +34,7 @@ from tools.admin import blizzard
 from tools.admin.catalog import Catalog, filters_from_query, whole
 from tools.admin.dashboard import summary
 from tools.admin.library import library_lines
-from tools.admin.lines import Line, merge
+from tools.admin.lines import Line, as_int, merge
 from tools.admin.packs import find_packs, read_tables
 from tools.admin.pages import (
     Clip,
@@ -49,12 +49,11 @@ from tools.admin.pages import (
 from tools.admin.people import Npc, VoiceInfo, npcs_of, voice_info, voices_in_use
 from tools.admin.render import esc
 from tools.admin.texts import Texts, annotate, load_texts, npc_names_of
-from tools.config import BETA_DIR, DATA_DIR, Config, load_config
+from tools.config import BETA_BUILD, BETA_DIR, DATA_DIR, Config, load_config
 
 ADDONS_DIR = BETA_DIR / "Interface" / "AddOns"
 SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 VOICE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
-BUILD = re.compile(r"^[0-9.]*$")
 
 
 def addons_from_env() -> Path:
@@ -147,6 +146,11 @@ def create_app(catalog: Catalog, config: Config | None = None) -> FastAPI:
         if info:
             in_use[voice] = info
     voices_html = voices_page(in_use, names)
+    # A clip is fetched from the default build or one a pick names, nothing else:
+    # the build is part of the cache path
+    builds = {BETA_BUILD} | {
+        source.build for source in config.voices.sources.values() if source.build
+    }
     # The library does not change while the admin runs: count it once
     dashboard = dashboard_page(
         summary(catalog, len(npcs), len(voices_in_use(catalog.lines))),
@@ -170,7 +174,7 @@ def create_app(catalog: Catalog, config: Config | None = None) -> FastAPI:
 
     @app.get("/npc/{key}", response_class=HTMLResponse)
     def npc(key: str) -> str:
-        speaker = int(key) if key.lstrip("-").isdigit() else None
+        speaker = as_int(key)
         if speaker is None or speaker not in npcs:
             raise HTTPException(404)
         found = npcs[speaker]
@@ -195,10 +199,11 @@ def create_app(catalog: Catalog, config: Config | None = None) -> FastAPI:
 
     @app.get("/clip/{fdid}.ogg")
     def clip(fdid: str, build: str = "") -> FileResponse:
-        if not fdid.isdigit() or not BUILD.match(build):
+        number = as_int(fdid)
+        if number is None or number < 0 or (build and build not in builds):
             raise HTTPException(404)
         try:
-            path = blizzard.clip_file(int(fdid), build or None)
+            path = blizzard.clip_file(number, build or None)
         except blizzard.ClipUnavailable as error:
             raise HTTPException(404) from error
         return FileResponse(path, media_type="audio/ogg")
