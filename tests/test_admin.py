@@ -6,6 +6,7 @@ import json
 import sqlite3
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,9 @@ from tools.admin.catalog import Catalog, Filters
 from tools.admin.library import library_lines
 from tools.admin.lines import Line, merge, natural
 from tools.admin.packs import find_packs, read_tables
+from tools.admin.people import npcs_of, voice_info, voices_in_use
 from tools.admin.texts import annotate, load_texts, npc_names_of, snapshot_zones
+from tools.config import Config, Tts, Voices, VoiceSources, VoiceTuning
 from tools.luatable import parse_value
 
 
@@ -888,3 +891,88 @@ def test_status_filters_and_line_counts():
     assert c.count_lines(Filters(status="no_text")) == 1
     assert c.count_lines(Filters(variants=True)) == c.count_lines(Filters()) == 4
     assert c.query(Filters(variants=True))[0] == c.query(Filters())[0] + 2
+
+
+def people_rows() -> list[Line]:
+    text_only = line("q:7:progress", speaker=197, text="Back already?")
+    text_only.files = []
+    return [
+        line(
+            "q:7:accept", speaker=197, voice="human-male-official", zone="Elwynn Forest"
+        ),
+        line(
+            "q:7:complete",
+            speaker=197,
+            voice="human-male-official",
+            zone="Elwynn Forest",
+        ),
+        text_only,
+        line(
+            "g:-5:bbbbbbbb", speaker=-5, voice="narrator", path="Gossip/-5-bbbbbbbb.mp3"
+        ),
+        line("q:20:accept", speaker=3197, voice="orc-male", zone="Durotar"),
+    ]
+
+
+def test_npcs_of_merges_sources():
+    from tools.admin.texts import Texts
+
+    texts = Texts(npcs={"197": {"name": "Marshal McBride", "displayID": 1883}})
+    tables = {
+        "sexes": {197: "m"},
+        "models": {3197: 119376},
+        "npcs": {-5: "Dusty Shelf"},
+    }
+    npcs = npcs_of(people_rows(), texts, [tables])
+    mcbride = npcs[197]
+    assert mcbride.name == "Marshal McBride" and mcbride.display_id == 1883
+    assert mcbride.sexes == "m" and mcbride.zones == ["Elwynn Forest"]
+    assert mcbride.voices == Counter({"human-male-official": 2}) and mcbride.lines == 3
+    assert npcs[-5].is_object and npcs[-5].name == "Dusty Shelf"
+    assert npcs[3197].model_file_id == 119376 and not npcs[3197].is_object
+    assert voices_in_use(people_rows()) == Counter(
+        {"human-male-official": 2, "narrator": 1, "orc-male": 1}
+    )
+
+
+def people_config() -> Config:
+    return Config(
+        voices=Voices(
+            fallbacks={"felorc": "orc", "narrator": "skyborne-male"},
+            sources={
+                "orc-male": VoiceSources(clips=[1, 2]),
+                "skyborne-male": VoiceSources(clips=[7], build="1.60.1.69977"),
+            },
+            speakers={"3197": "orc-male"},
+        ),
+        tts=Tts(voices={"orc-male": VoiceTuning(cfg_weight=0.2)}),
+    )
+
+
+def test_voice_info_own_and_borrowed():
+    cfg = people_config()
+    own = voice_info("orc-male", cfg, people_rows())
+    assert own is not None
+    assert own.tuning == {"cfg_weight": 0.2} and own.pick == [1, 2]
+    assert own.borrowed_from is None and own.pinned_speakers == ["3197"]
+    assert own.defaults["cfg_weight"] == 0.5 and own.speakers == Counter({3197: 1})
+    felorc = voice_info("felorc-male", cfg, people_rows())
+    assert felorc is not None and felorc.tuning is None
+    assert felorc.fallbacks == ["orc-male"] and felorc.borrowed_from == "orc-male"
+    assert felorc.pick == [1, 2]
+    narrator = voice_info("narrator", cfg, people_rows())
+    assert narrator is not None and narrator.borrowed_from == "skyborne-male"
+    assert narrator.pick == [7] and narrator.pick_build == "1.60.1.69977"
+    archetype = voice_info("human-male-official", cfg, people_rows())
+    assert archetype is not None and archetype.fallbacks[:1] == ["human-male"]
+    assert archetype.rows == 2 and archetype.pick == []
+    assert voice_info("no-such-voice", cfg, people_rows()) is None
+
+
+def test_voice_info_fallback_cycle():
+    cfg = Config(voices=Voices(fallbacks={"aa": "bb", "bb": "aa"}))
+    rows = [line("q:1:accept", voice="aa-male")]
+    info = voice_info("aa-male", cfg, rows)
+    assert info is not None and info.fallbacks == [
+        "bb-male"
+    ]  # stops before aa-male again
