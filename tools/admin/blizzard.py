@@ -15,10 +15,15 @@ import functools
 from dataclasses import dataclass
 from pathlib import Path
 
+import requests
+
 from tools.config import BETA_BUILD, VOICES_DIR
 from tools.wowdata import display_sound_set, fetch_file, is_dud, load_db2
 
 KITS = ("greeting", "farewell", "annoyed", "other")  # NPCSounds.SoundID_0..3
+# What wago and its cached tables raise: network trouble, a missing or partial
+# file, a malformed row
+WAGO_ERRORS = (requests.RequestException, OSError, ValueError, KeyError)
 
 
 @dataclass(frozen=True)
@@ -37,7 +42,7 @@ def npc_sound_set(display_id: int | None) -> int | None:
         return None
     try:
         return display_sound_set(display_id)
-    except Exception:  # network or table trouble: no set rather than no page
+    except WAGO_ERRORS:  # no set rather than no page
         return None
 
 
@@ -55,7 +60,7 @@ def set_barks(set_id: int) -> list[Bark]:
     try:
         row = load_db2("NPCSounds").get(set_id)
         files = kit_files() if row else {}
-    except Exception:
+    except WAGO_ERRORS:
         return []
     if not row:
         return []
@@ -77,6 +82,6 @@ def clip_file(fdid: int, build: str | None = None) -> Path:
             raise ClipUnavailable(f"{fdid} is not audio in build {build}")
     except ClipUnavailable:
         raise
-    except Exception as error:
+    except WAGO_ERRORS as error:
         raise ClipUnavailable(f"{fdid}: {error}") from error
     return path
