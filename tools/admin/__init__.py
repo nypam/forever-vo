@@ -30,19 +30,31 @@ from urllib.parse import parse_qs
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
+from tools.admin import blizzard
 from tools.admin.catalog import Catalog, filters_from_query, whole
 from tools.admin.dashboard import summary
 from tools.admin.library import library_lines
 from tools.admin.lines import Line, merge
 from tools.admin.packs import find_packs, read_tables
-from tools.admin.pages import audio_urls, compare_url, dashboard_page, lines_page
-from tools.admin.people import npcs_of, voices_in_use
+from tools.admin.pages import (
+    Clip,
+    audio_urls,
+    compare_url,
+    dashboard_page,
+    lines_page,
+    npc_page,
+    voice_page,
+    voices_page,
+)
+from tools.admin.people import Npc, VoiceInfo, npcs_of, voice_info, voices_in_use
 from tools.admin.render import esc
 from tools.admin.texts import Texts, annotate, load_texts, npc_names_of
-from tools.config import BETA_DIR, DATA_DIR
+from tools.config import BETA_DIR, DATA_DIR, Config, load_config
 
 ADDONS_DIR = BETA_DIR / "Interface" / "AddOns"
 SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+VOICE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+BUILD = re.compile(r"^[0-9.]*$")
 
 
 def addons_from_env() -> Path:
@@ -94,14 +106,47 @@ def notices(catalog: Catalog) -> list[str]:
     return out
 
 
-def create_app(catalog: Catalog) -> FastAPI:
+def npc_soundboard(
+    npc: Npc, infos: dict[str, VoiceInfo | None]
+) -> tuple[str, list[Clip]]:
+    """The Blizzard recordings an NPC page plays: its own NPCSounds set when its
+    display is known, else the clips behind the voice it is cast with, labelled
+    as that voice's. A model is never guessed into a set: one model is cast with
+    many (the human male model with 15)."""
+    set_id = blizzard.npc_sound_set(npc.display_id)
+    if set_id:
+        clips = [Clip(bark.fdid, bark.kit) for bark in blizzard.set_barks(set_id)]
+        return f"Blizzard voice set {set_id}", clips
+    for voice, _ in npc.voices.most_common():
+        info = infos.get(voice)
+        if info and info.pick:
+            borrowed = (
+                f" (borrowed from {info.borrowed_from})" if info.borrowed_from else ""
+            )
+            clips = [
+                Clip(fdid, f"clip {i}", info.pick_build or "")
+                for i, fdid in enumerate(info.pick, 1)
+            ]
+            return f"Blizzard clips behind {voice}{borrowed}", clips
+    return "No Blizzard recordings known for this NPC.", []
+
+
+def create_app(catalog: Catalog, config: Config | None = None) -> FastAPI:
     app = FastAPI(title="Forever Voiceover admin")
+    config = config or load_config()
     packs = {pack.folder: pack for pack in catalog.packs}
     npcs = npcs_of(
         catalog.lines,
         catalog.texts or Texts(),
         [read_tables(pack) for pack in catalog.packs],
     )
+    names = {key: npc.name for key, npc in npcs.items() if npc.name}
+    in_use: dict[str, VoiceInfo] = {}
+    for voice in voices_in_use(catalog.lines):
+        info = voice_info(voice, config, catalog.lines)
+        if info:
+            in_use[voice] = info
+    voices_html = voices_page(in_use, names)
     # The library does not change while the admin runs: count it once
     dashboard = dashboard_page(
         summary(catalog, len(npcs), len(voices_in_use(catalog.lines))),
@@ -122,6 +167,41 @@ def create_app(catalog: Catalog) -> FastAPI:
     @app.get("/lines", response_class=HTMLResponse)
     def lines_html(request: Request) -> str:
         return lines_page(catalog, request.url.query)
+
+    @app.get("/npc/{key}", response_class=HTMLResponse)
+    def npc(key: str) -> str:
+        speaker = int(key) if key.lstrip("-").isdigit() else None
+        if speaker is None or speaker not in npcs:
+            raise HTTPException(404)
+        found = npcs[speaker]
+        infos: dict[str, VoiceInfo | None] = {v: in_use.get(v) for v in found.voices}
+        title, clips = npc_soundboard(found, infos)
+        return npc_page(catalog, found, infos, title, clips)
+
+    @app.get("/voice/{name}", response_class=HTMLResponse)
+    def voice(name: str) -> str:
+        info = (
+            in_use.get(name) or voice_info(name, config, catalog.lines)
+            if VOICE_NAME.match(name)
+            else None
+        )
+        if info is None:
+            raise HTTPException(404)
+        return voice_page(catalog, info, names)
+
+    @app.get("/voices", response_class=HTMLResponse)
+    def voices() -> str:
+        return voices_html
+
+    @app.get("/clip/{fdid}.ogg")
+    def clip(fdid: str, build: str = "") -> FileResponse:
+        if not fdid.isdigit() or not BUILD.match(build):
+            raise HTTPException(404)
+        try:
+            path = blizzard.clip_file(int(fdid), build or None)
+        except blizzard.ClipUnavailable as error:
+            raise HTTPException(404) from error
+        return FileResponse(path, media_type="audio/ogg")
 
     @app.get("/api/facets")
     def facets() -> dict[str, Any]:

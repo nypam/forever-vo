@@ -1226,3 +1226,105 @@ def test_pages_escape_text(tmp_path):
     assert (
         "&lt;Novice $C gulps.&gt;" in page and "The &quot;Brave&quot; &amp; Co" in page
     )
+
+
+def npc_client(tmp_path: Path, *, display: bool):
+    """The admin over one pack: NPC 197 speaks quest 7 in human-male-official, an
+    object (-5) has gossip, and the voice's pick is clip 540633."""
+    from fastapi.testclient import TestClient
+
+    from tools.admin import build_catalog, create_app
+
+    make_pack(
+        tmp_path / "addons",
+        "ForeverVO_Data_X",
+        tables={
+            "Quests.lua": lua(
+                "quests", '{ [7] = { a=1.0, va="human-male-official", npc=197 } }'
+            ),
+            "Gossip.lua": lua(
+                "gossip",
+                '{ [-5] = { { f="-5-bbbbbbbb", h="bbbbbbbb", t="Dusty.", d=1.0, v="narrator" } } }',
+            ),
+            "NPCs.lua": lua(
+                "npcs", '{ [197] = "Marshal McBride", [-5] = "Dusty Shelf" }'
+            ),
+        },
+        files=["Quests/7-accept.mp3", "Gossip/-5-bbbbbbbb.mp3"],
+    )
+    record = {"name": "Marshal McBride"} | ({"displayID": 1883} if display else {})
+    write_sources(
+        tmp_path / "data", capture={"quests": {}, "gossip": {}, "npcs": {"197": record}}
+    )
+    config = Config(
+        voices=Voices(sources={"human-male-official": VoiceSources(clips=[540633])}),
+        tts=Tts(voices={"human-male-official": VoiceTuning(cfg_weight=0.3)}),
+    )
+    catalog = build_catalog(tmp_path / "addons", None, tmp_path / "data")
+    return TestClient(create_app(catalog, config=config))
+
+
+def test_npc_page_with_set(wago, tmp_path):
+    page = npc_client(tmp_path, display=True).get("/npc/197")
+    assert page.status_code == 200 and "Marshal McBride" in page.text
+    assert "Blizzard voice set 48" in page.text
+    assert (
+        'data-src="/clip/900.ogg?build="' in page.text and "/clip/950.ogg" in page.text
+    )
+    assert (
+        'href="/voice/human-male-official"' in page.text
+        and "shared by 1 NPC" in page.text
+    )
+    assert wago == []  # rendering fetched no clip
+
+
+def test_npc_page_falls_back_to_voice_clips(wago, tmp_path):
+    page = npc_client(tmp_path, display=False).get("/npc/197").text
+    assert "Blizzard clips behind human-male-official" in page
+    assert 'data-src="/clip/540633.ogg?build="' in page
+
+
+def test_npc_page_object_and_unknown(wago, tmp_path):
+    c = npc_client(tmp_path, display=False)
+    page = c.get("/npc/-5")
+    assert page.status_code == 200 and "Dusty Shelf" in page.text
+    assert (
+        "No Blizzard recordings known" in page.text
+        or "Blizzard clips behind narrator" in page.text
+    )
+    assert c.get("/npc/424242").status_code == 404
+    assert c.get("/npc/abc").status_code == 404
+
+
+def test_npc_page_offline(offline, tmp_path):
+    c = npc_client(tmp_path, display=True)
+    assert c.get("/npc/197").status_code == 200
+    assert c.get("/clip/900.ogg").status_code == 404
+
+
+def test_clip_route(wago, tmp_path):
+    c = npc_client(tmp_path, display=True)
+    clip = c.get("/clip/900.ogg")
+    assert clip.status_code == 200 and clip.headers["content-type"] == "audio/ogg"
+    assert c.get("/clip/900.ogg?build=1.60.1.69977").status_code == 200
+    assert c.get("/clip/900.ogg?build=../x").status_code == 404
+    assert c.get("/clip/abc.ogg").status_code == 404
+
+
+def test_voice_page_names(wago, tmp_path):
+    c = npc_client(tmp_path, display=False)
+    page = c.get("/voice/human-male-official")
+    assert page.status_code == 200
+    assert (
+        'data-src="/clip/540633.ogg?build="' in page.text and "cfg_weight" in page.text
+    )
+    assert 'href="/npc/197"' in page.text
+    assert c.get("/voice/narrator").status_code == 200
+    for bad in ["/voice/..%2Fx", "/voice/no-such-voice", "/voice/%20"]:
+        assert c.get(bad).status_code == 404, bad
+
+
+def test_voices_page(wago, tmp_path):
+    page = npc_client(tmp_path, display=False).get("/voices").text
+    assert 'href="/voice/human-male-official"' in page and "picked" in page
+    assert 'href="/voice/narrator"' in page and "automatic" in page
