@@ -1160,3 +1160,69 @@ def test_filters_from_query_is_lenient():
         True,
     )
     assert filters_from_query("") == Filters()
+
+
+def test_dashboard_page(client):
+    page = client.get("/")
+    assert page.status_code == 200 and "Quests known" in page.text
+    assert 'href="/lines?status=voiced"' in page.text
+    assert 'href="/lines?kind=progress&amp;status=text_only"' in page.text
+    assert 'href="/voices"' in page.text
+    assert "basecoat-css@1.0.2" in page.text
+
+
+def test_lines_page_players_and_links(client):
+    page = client.get("/lines?quest=7").text
+    assert 'href="/npc/197"' in page and 'href="/voice/human-male"' in page
+    assert 'data-src="/api/audio/pack/ForeverVO_Data_New/Quests/7-accept.mp3"' in page
+    assert 'data-src="/api/audio/compare/Quests/7-accept.mp3"' in page
+    assert "1 line (1 row)" in page
+
+
+def test_lines_page_plays_parts_in_order(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from tools.admin import build_catalog, create_app
+
+    quest_pack(
+        tmp_path / "addons",
+        '{ [9] = { c=3.0, vc="v", cP = { { d=1.1 }, { d=1.4, n=true } } } }',
+        files=["Quests/9-p1-complete.mp3", "Quests/9-p2-complete.mp3"],
+    )
+    page = (
+        TestClient(create_app(build_catalog(tmp_path / "addons", None, tmp_path)))
+        .get("/lines")
+        .text
+    )
+    assert (
+        'data-srcs="[&quot;/api/audio/pack/ForeverVO_Data_X/Quests/9-p1-complete.mp3&quot;, '
+        '&quot;/api/audio/pack/ForeverVO_Data_X/Quests/9-p2-complete.mp3&quot;]"'
+    ) in page
+
+
+def test_pages_escape_text(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from tools.admin import build_catalog, create_app
+
+    make_pack(
+        tmp_path / "addons",
+        "ForeverVO_Data_X",
+        tables={
+            "Gossip.lua": lua(
+                "gossip",
+                '{ [10721] = { { f="10721-529f8cda", h="529f8cda",'
+                ' t="<Novice $C gulps.> I can do this.", d=3.3, v="tauren-male" } } }',
+            ),
+            "NPCs.lua": lua("npcs", '{ [10721] = "The \\"Brave\\" & Co" }'),
+        },
+        files=["Gossip/10721-529f8cda.mp3"],
+    )
+    c = TestClient(create_app(build_catalog(tmp_path / "addons", None, tmp_path)))
+    for url in ("/lines?kind=gossip", "/"):
+        page = c.get(url).text
+        assert "<Novice" not in page and '"Brave"' not in page
+    page = c.get("/lines?kind=gossip").text
+    assert (
+        "&lt;Novice $C gulps.&gt;" in page and "The &quot;Brave&quot; &amp; Co" in page
+    )

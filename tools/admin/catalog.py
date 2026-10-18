@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlencode
 
 from tools.admin.lines import Line, is_variant, line_key, voiced
 from tools.admin.packs import Pack
+from tools.admin.texts import Texts
 
 MAX_LIMIT = 500
 
@@ -120,6 +121,7 @@ class Catalog:
         self.compare_dir = compare_dir
         self.addons = addons
         self.has_classic = has_classic
+        self.texts: Texts | None = None  # the sources the lines were read with
         self.compare_files = (
             listing(compare_dir) if compare_dir and compare_dir.is_dir() else set()
         )

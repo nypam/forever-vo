@@ -23,19 +23,22 @@ import re
 import sys
 import threading
 import webbrowser
-from importlib import resources
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 from tools.admin.catalog import Catalog, filters_from_query, whole
+from tools.admin.dashboard import summary
 from tools.admin.library import library_lines
 from tools.admin.lines import Line, merge
 from tools.admin.packs import find_packs, read_tables
-from tools.admin.texts import annotate, load_texts, npc_names_of
+from tools.admin.pages import audio_urls, compare_url, dashboard_page, lines_page
+from tools.admin.people import npcs_of, voices_in_use
+from tools.admin.render import esc
+from tools.admin.texts import Texts, annotate, load_texts, npc_names_of
 from tools.config import BETA_DIR, DATA_DIR
 
 ADDONS_DIR = BETA_DIR / "Interface" / "AddOns"
@@ -54,7 +57,9 @@ def build_catalog(
     texts = load_texts(data_dir)
     lines = library_lines(merge(packs), texts)
     annotate(lines, texts, npc_names_of([read_tables(pack) for pack in packs]))
-    return Catalog(lines, packs, compare_dir, addons, texts.has_classic)
+    catalog = Catalog(lines, packs, compare_dir, addons, texts.has_classic)
+    catalog.texts = texts
+    return catalog
 
 
 def safe_file(root: Path, path: str) -> Path:
@@ -71,26 +76,52 @@ def safe_file(root: Path, path: str) -> Path:
     return file
 
 
+def notices(catalog: Catalog) -> list[str]:
+    """What the dashboard says is missing, as HTML."""
+    out = []
+    if not catalog.packs:
+        out.append(
+            f"No voice packs found in <code>{esc(catalog.addons or '(none)')}</code>. Set "
+            "<code>WOW_DIR</code> to the folder holding <code>_classic_beta_</code>, or start "
+            "with <code>--addons &lt;Interface/AddOns&gt;</code>."
+        )
+    if not catalog.has_classic:
+        out.append(
+            "Classic quests show no text, level or display until you run "
+            "<code>uv run --no-group tts fvo-classicdb</code> (it writes "
+            "<code>tools/data/bulk/classic.json</code>), then restart."
+        )
+    return out
+
+
 def create_app(catalog: Catalog) -> FastAPI:
-    app = FastAPI(title="Forever Voiceover pack browser")
-    page = (resources.files(__package__) / "index.html").read_text(encoding="utf-8")
+    app = FastAPI(title="Forever Voiceover admin")
     packs = {pack.folder: pack for pack in catalog.packs}
+    npcs = npcs_of(
+        catalog.lines,
+        catalog.texts or Texts(),
+        [read_tables(pack) for pack in catalog.packs],
+    )
+    # The library does not change while the admin runs: count it once
+    dashboard = dashboard_page(
+        summary(catalog, len(npcs), len(voices_in_use(catalog.lines))),
+        notices(catalog),
+    )
 
     def row(line: Line) -> dict[str, Any]:
-        compared = catalog.compare_path(line)
         return {
             **dataclasses.asdict(line),
-            "urls": []
-            if line.missing
-            else [f"/api/audio/pack/{quote(line.pack)}/{quote(f)}" for f in line.files],
-            "compare_url": f"/api/audio/compare/{quote(compared)}"
-            if compared
-            else None,
+            "urls": audio_urls(line),
+            "compare_url": compare_url(catalog, line),
         }
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
-        return page
+        return dashboard
+
+    @app.get("/lines", response_class=HTMLResponse)
+    def lines_html(request: Request) -> str:
+        return lines_page(catalog, request.url.query)
 
     @app.get("/api/facets")
     def facets() -> dict[str, Any]:
