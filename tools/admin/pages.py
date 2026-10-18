@@ -338,23 +338,29 @@ def npc_page(
     infos: dict[str, VoiceInfo | None],
     board_title: str,
     clips: list[Clip],
+    portrait: int | None = None,
 ) -> str:
+    """`portrait` is the display the picture shows when the NPC has none of its
+    own: one of the same model (Forever's NPCs are captured with a model file)."""
     rows_total, rows = catalog.query(
         Filters(npc=str(npc.key), variants=True), limit=500
     )
     sexes = {"m": "male", "f": "female", "mf": "male and female"}.get(
         npc.sexes, "unknown"
     )
+    portrait = npc.display_id or portrait
     if npc.display_id:
         model = f"display {npc.display_id}"
+    elif npc.model_file_id and portrait:
+        model = f"model file {npc.model_file_id} · picture from display {portrait}"
     elif npc.model_file_id:
         model = f"model file {npc.model_file_id}"
     else:
         model = "unknown"
     art = ""
-    if npc.display_id:
+    if portrait:
         art = (
-            f'<div class="art"><img alt="" src="{model_image(npc.display_id)}"'
+            f'<div class="art"><img alt="" src="{model_image(portrait)}"'
             ' onerror="this.remove()"></div>'
         )
     wowhead = ""

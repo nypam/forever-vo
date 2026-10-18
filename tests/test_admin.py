@@ -1011,13 +1011,30 @@ SOUND_KIT_ENTRY = {
 }
 
 
+# Two displays of model 30 (file 119376), one of model 31 (file 222)
+DISPLAYS = {
+    5021: {"ID": "5021", "ModelID": "30"},
+    4880: {"ID": "4880", "ModelID": "30"},
+    7000: {"ID": "7000", "ModelID": "31"},
+}
+MODELS = {
+    30: {"ID": "30", "FileDataID": "119376"},
+    31: {"ID": "31", "FileDataID": "222"},
+}
+
+
 @pytest.fixture
 def wago(monkeypatch, tmp_path):
     """blizzard's wago access, offline: two db2 tables and a fetch that writes an Ogg."""
     fetched: list[tuple[int, Path, str]] = []
 
     def load_db2(table: str, build: str = "") -> dict[int, dict[str, str]]:
-        return {"NPCSounds": NPC_SOUNDS, "SoundKitEntry": SOUND_KIT_ENTRY}[table]
+        return {
+            "NPCSounds": NPC_SOUNDS,
+            "SoundKitEntry": SOUND_KIT_ENTRY,
+            "CreatureDisplayInfo": DISPLAYS,
+            "CreatureModelData": MODELS,
+        }[table]
 
     def fetch_file(fdid: int, dest: Path, build: str = "") -> Path:
         fetched.append((fdid, dest, build))
@@ -1032,8 +1049,10 @@ def wago(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(blizzard, "VOICES_DIR", tmp_path / "voices")
     blizzard.kit_files.cache_clear()
+    blizzard.model_displays.cache_clear()
     yield fetched
     blizzard.kit_files.cache_clear()
+    blizzard.model_displays.cache_clear()
 
 
 @pytest.fixture
@@ -1047,8 +1066,10 @@ def offline(monkeypatch):
     monkeypatch.setattr(blizzard, "fetch_file", refuse)
     monkeypatch.setattr(blizzard, "display_sound_set", refuse)
     blizzard.kit_files.cache_clear()
+    blizzard.model_displays.cache_clear()
     yield
     blizzard.kit_files.cache_clear()
+    blizzard.model_displays.cache_clear()
 
 
 def test_set_barks_join(wago):
@@ -1235,7 +1256,7 @@ def test_pages_escape_text(tmp_path):
     )
 
 
-def npc_client(tmp_path: Path, *, display: bool):
+def npc_client(tmp_path: Path, *, display: bool, model: int | None = None):
     """The admin over one pack: NPC 197 speaks quest 7 in human-male-official, an
     object (-5) has gossip, and the voice's pick is clip 540633."""
     from fastapi.testclient import TestClient
@@ -1259,7 +1280,11 @@ def npc_client(tmp_path: Path, *, display: bool):
         },
         files=["Quests/7-accept.mp3", "Gossip/-5-bbbbbbbb.mp3"],
     )
-    record = {"name": "Marshal McBride"} | ({"displayID": 1883} if display else {})
+    record = (
+        {"name": "Marshal McBride"}
+        | ({"displayID": 1883} if display else {})
+        | ({"modelFileID": model} if model else {})
+    )
     write_sources(
         tmp_path / "data", capture={"quests": {}, "gossip": {}, "npcs": {"197": record}}
     )
@@ -1360,3 +1385,26 @@ def test_voices_page(wago, tmp_path):
     page = npc_client(tmp_path, display=False).get("/voices").text
     assert 'href="/voice/human-male-official"' in page and "picked" in page
     assert 'href="/voice/narrator"' in page and "automatic" in page
+
+
+def test_model_display_for_a_portrait(wago):
+    assert blizzard.model_display(119376) == 4880  # the lowest display of that model
+    assert blizzard.model_display(222) == 7000
+    assert blizzard.model_display(999) is None and blizzard.model_display(None) is None
+
+
+def test_model_display_offline(offline):
+    assert blizzard.model_display(119376) is None
+
+
+def test_npc_page_portrait_from_model(wago, tmp_path):
+    page = npc_client(tmp_path, display=False, model=119376).get("/npc/197").text
+    assert "webthumbs/npc/" in page and "/4880.webp" in page
+    assert "model file 119376" in page and "picture from display 4880" in page
+    # the picture is only a picture: the soundboard is still the voice's, not a guessed set
+    assert "Blizzard clips behind human-male-official" in page
+
+
+def test_npc_page_portrait_from_display(wago, tmp_path):
+    page = npc_client(tmp_path, display=True, model=119376).get("/npc/197").text
+    assert "/1883.webp" in page and "picture from display" not in page

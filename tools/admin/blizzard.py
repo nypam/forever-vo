@@ -85,3 +85,30 @@ def clip_file(fdid: int, build: str | None = None) -> Path:
     except WAGO_ERRORS as error:
         raise ClipUnavailable(f"{fdid}: {error}") from error
     return path
+
+
+@functools.cache
+def model_displays() -> dict[int, int]:
+    """Model file -> the lowest creature display that uses it."""
+    models = {
+        model_id: int(row.get("FileDataID") or 0)
+        for model_id, row in load_db2("CreatureModelData").items()
+    }
+    displays: dict[int, int] = {}
+    for display_id, row in sorted(load_db2("CreatureDisplayInfo").items()):
+        model_file = models.get(int(row.get("ModelID") or 0))
+        if model_file:
+            displays.setdefault(model_file, display_id)
+    return displays
+
+
+def model_display(model_file_id: int | None) -> int | None:
+    """A display of the same model, for a portrait only. Forever's own NPCs are
+    captured with a model file and no display; a model is cast with many voice
+    sets and skins, so this display names the picture, never the NPC's voice."""
+    if not model_file_id:
+        return None
+    try:
+        return model_displays().get(model_file_id)
+    except WAGO_ERRORS:
+        return None

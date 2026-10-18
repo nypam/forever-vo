@@ -180,7 +180,8 @@ def create_app(catalog: Catalog, config: Config | None = None) -> FastAPI:
         found = npcs[speaker]
         infos: dict[str, VoiceInfo | None] = {v: in_use.get(v) for v in found.voices}
         title, clips = npc_soundboard(found, infos)
-        return npc_page(catalog, found, infos, title, clips)
+        portrait = found.display_id or blizzard.model_display(found.model_file_id)
+        return npc_page(catalog, found, infos, title, clips, portrait)
 
     @app.get("/voice/{name}", response_class=HTMLResponse)
     def voice(name: str) -> str:
