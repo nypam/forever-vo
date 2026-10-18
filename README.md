@@ -104,6 +104,37 @@ WOW_DIR="$HOME/Games/World of Warcraft" ./tools/run.sh audition
 AUDITION_ADDONS="$PWD/addons" ./tools/run.sh audition
 ```
 
+### Browsing the voice packs
+
+`fvo-browse` opens a local page (port 8766) listing every line in the installed
+voice packs. You can filter by kind, pack, voice, zone, level, quest, NPC or
+words, and play each line the way the addon plays it: a line with stage
+directions plays part by part. It only reads, and it needs no GPU stack, so it
+runs on Windows too. It finds the packs the way audition does (`--addons`, else
+`AUDITION_ADDONS`, else `WOW_DIR`).
+
+```sh
+uv run --no-group tts --group browse fvo-browse --open
+```
+
+```powershell
+# Windows: point WOW_DIR at the folder that holds _classic_beta_
+$env:WOW_DIR = "C:\Program Files (x86)\World of Warcraft"
+uv run --no-group tts --group browse fvo-browse --open
+```
+
+Quest text for Classic's quests comes from `tools/data/bulk/classic.json`. Run
+`uv run --no-group tts fvo-classicdb` once to write it. Until then those quests
+list and play, but show no text.
+
+`--compare <folder>` (or `FVO_COMPARE`) puts another pipeline's takes beside
+the packs' own. The folder is laid out like a pack's `Sounds/`, for example
+`Quests/<questID>-<accept|progress|complete>.mp3` and
+`Gossip/<speaker>-<hash>.mp3` (the hash is `tools/textkey.py`'s). A line whose
+file is there too gets a second play button. A `$G` line also pairs with a
+plain file when there is no `m-`/`f-` one. The folder is read at startup, so
+restart after adding takes.
+
 ### Audition on an AMD GPU
 
 The default `tts` group is the CUDA wheel. On AMD, audition uses the

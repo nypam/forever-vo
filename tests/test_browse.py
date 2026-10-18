@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -615,3 +617,98 @@ def test_facets_counts(tmp_path):
     )
     assert facets["has_classic"] is False and facets["packs_found"] == 0
     assert facets["addons"] == str(tmp_path)
+
+
+@pytest.fixture
+def client(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from tools.browse import build_catalog, create_app
+
+    quest_pack(
+        tmp_path / "addons",
+        '{ [7] = { a=1.0, va="human-male", npc=197 } }',
+        files=["Quests/7-accept.mp3"],
+        folder="ForeverVO_Data_New",
+    )
+    (tmp_path / "addons" / "ForeverVO_Data_New" / "Data" / "Pack.lua").touch()
+    compare = compare_dir(tmp_path, "Quests/7-accept.mp3")
+    (tmp_path / "secret.mp3").write_bytes(b"")
+    catalog = build_catalog(tmp_path / "addons", compare, tmp_path / "data")
+    return TestClient(create_app(catalog))
+
+
+def test_lines_api_and_audio(client):
+    r = client.get("/api/lines", params={"kind": "accept", "quest": 7}).json()
+    assert r["total"] == 1
+    row = r["rows"][0]
+    assert row["urls"] == ["/api/audio/pack/ForeverVO_Data_New/Quests/7-accept.mp3"]
+    assert row["compare_url"] == "/api/audio/compare/Quests/7-accept.mp3"
+    audio = client.get(row["urls"][0])
+    assert audio.status_code == 200 and audio.headers["content-type"] == "audio/mpeg"
+    assert client.get(row["compare_url"]).status_code == 200
+    assert client.get("/api/lines", params={"compare": 1}).json()["total"] == 1
+    assert client.get("/api/lines", params={"kind": "gossip"}).json() == {
+        "total": 0,
+        "rows": [],
+    }
+
+
+def test_missing_row_has_no_urls(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from tools.browse import build_catalog, create_app
+
+    quest_pack(tmp_path / "addons", "{ [8] = { a=1.0 } }")
+    c = TestClient(create_app(build_catalog(tmp_path / "addons", None, tmp_path)))
+    row = c.get("/api/lines").json()["rows"][0]
+    assert row["missing"] and row["urls"] == [] and row["compare_url"] is None
+
+
+def test_audio_path_refused(client):
+    for url in [
+        "/api/audio/pack/ForeverVO_Data_New/../Data/Pack.lua",
+        "/api/audio/pack/ForeverVO_Data_New/Quests/..%2F..%2FData%2FPack.lua",
+        "/api/audio/pack/ForeverVO_Data_New/Quests/..%5C..%5Csecret.mp3",
+        "/api/audio/pack/NotAPack/Quests/7-accept.mp3",
+        "/api/audio/pack/ForeverVO_Data_New/Quests/7-accept.lua",
+        "/api/audio/pack/ForeverVO_Data_New/Quests/nope.mp3",
+        "/api/audio/compare/../secret.mp3",
+        "/api/audio/compare/..%2Fsecret.mp3",
+    ]:
+        assert client.get(url).status_code == 404, url
+
+
+def test_no_packs_found(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from tools.browse import build_catalog, create_app
+
+    c = TestClient(create_app(build_catalog(tmp_path / "missing", None, tmp_path)))
+    facets = c.get("/api/facets").json()
+    assert facets["packs_found"] == 0 and facets["addons"].endswith("missing")
+    assert facets["totals"]["lines"] == 0
+    page = c.get("/")
+    assert page.status_code == 200 and "<title>" in page.text
+    assert c.get("/api/audio/compare/Quests/7-accept.mp3").status_code == 404
+
+
+def test_browse_does_not_import_the_pipeline():
+    from tools.config import ROOT
+
+    probe = (
+        "import sys, tools.browse; "
+        "print(','.join(m for m in ('tools.generate', 'tools.audition', 'torch', "
+        "'chatterbox', 'fcntl') if m in sys.modules))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=ROOT,
+    )
+    found = set(filter(None, out.stdout.strip().split(",")))
+    if sys.platform != "win32":
+        found.discard("fcntl")  # the stdlib may load it on Linux; the pipeline never
+    assert found == set()

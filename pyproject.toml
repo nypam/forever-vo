@@ -41,6 +41,12 @@ tts = [
     "fastapi",                 # the audition page (uv run audition); both already come with chatterbox
     "uvicorn",
 ]
+# The pack browser (fvo-browse) alone: no GPU stack, so it runs on any machine,
+# Windows included: `uv run --no-group tts --group browse fvo-browse`.
+browse = [
+    "fastapi",
+    "uvicorn",
+]
 # Same Chatterbox pin, on PyTorch's ROCm 6.2.4 wheel instead of the PyPI CUDA
 # wheel. The two groups conflict, so `uv lock` keeps both and the default stays
 # `tts` (what the nightly run generates with). Audition on an AMD GPU:
@@ -79,6 +85,7 @@ fvo-refclips = "tools.refclips:main"
 fvo-soundpaths = "tools.soundpaths:main"
 fvo-extract-wc3-units = "tools.extract_wc3_units:main"
 fvo-tts-smoke = "tools.tts_smoke:main"
+fvo-browse = "tools.browse:main"  # every line in the installed packs, beside another pipeline's takes
 
 [build-system]
 requires = ["uv_build>=0.12,<0.13"]
