@@ -12,7 +12,8 @@ from typing import Any
 import pytest
 
 from tools.admin.catalog import Catalog, Filters
-from tools.admin.lines import Line, merge
+from tools.admin.library import library_lines
+from tools.admin.lines import Line, merge, natural
 from tools.admin.packs import find_packs, read_tables
 from tools.admin.texts import annotate, load_texts, npc_names_of, snapshot_zones
 from tools.luatable import parse_value
@@ -792,3 +793,98 @@ def test_bad_number_filters_are_ignored(client):
         client.get("/api/lines", params={"quest": "abc"}).json()["total"] == everything
     )
     assert client.get("/api/lines", params={"quest": "7.0"}).json()["total"] == 1
+
+
+LIBRARY_CAPTURE = {
+    "quests": {
+        "7-accept": {"text": "Kobolds.", "questID": 7, "npc": "197"},
+        "7-progress": {"text": "Back already?", "questID": 7, "npc": "197"},
+        "5-accept": {"text": "Hello $gsir:madam;.", "questID": 5},
+    },
+    "gossip": {"68|0135d8e6": {"npc": "68", "text": "Fishing."}},
+    "books": {"aa11bb22": {"text": "A page.", "title": "A Book"}},
+    "npcs": {},
+}
+
+
+def library_fixture(tmp_path: Path) -> list[Line]:
+    quest_pack(
+        tmp_path / "addons",
+        '{ [7] = { a=1.0, va="human-male", npc=197 }, [5] = { a=2.0, g="a" } }',
+        files=["Quests/7-accept.mp3", "Quests/m-5-accept.mp3", "Quests/f-5-accept.mp3"],
+    )
+    write_sources(tmp_path / "data", capture=LIBRARY_CAPTURE)
+    return library_lines(
+        merge(find_packs(tmp_path / "addons")), load_texts(tmp_path / "data")
+    )
+
+
+def test_text_only_rows_join_the_library(tmp_path):
+    lines = library_fixture(tmp_path)
+    by = {found.id: found for found in lines}
+    assert by["q:7:accept"].pack == "ForeverVO_Data_X"  # the pack row, not a duplicate
+    assert [found.id for found in lines].count("q:7:accept") == 1
+    progress = by["q:7:progress"]
+    assert progress.files == [] and progress.pack == "" and progress.voice is None
+    assert progress.text == "Back already?" and progress.path == "Quests/7-progress.mp3"
+    assert (
+        progress.speaker == 197
+        and progress.quest_id == 7
+        and progress.kind == "progress"
+    )
+    gossip = by["g:68:0135d8e6"]
+    assert gossip.speaker == 68 and gossip.path == "Gossip/68-0135d8e6.mp3"
+    assert gossip.text == "Fishing." and gossip.kind == "gossip"
+    book = by["b:aa11bb22"]
+    assert book.path == "Books/aa11bb22-page.mp3" and book.title == "A Book"
+    assert [found.id for found in lines] == sorted(
+        (found.id for found in lines), key=natural
+    )
+
+
+def test_gendered_pack_line_is_not_repeated_as_text_only(tmp_path):
+    ids = {found.id for found in library_fixture(tmp_path)}
+    assert {"q:5:accept:male", "q:5:accept:female"} <= ids
+    assert "q:5:accept" not in ids
+
+
+def status_rows() -> list[Line]:
+    text_only = line("q:7:progress", text="Back already?")
+    text_only.files = []
+    return [
+        line(
+            "q:5:accept:male", variant="male", path="Quests/m-5-accept.mp3", text="Hi"
+        ),
+        line(
+            "q:5:accept:female",
+            variant="female",
+            path="Quests/f-5-accept.mp3",
+            text="Hi",
+        ),
+        line(
+            "q:5:accept:sex f",
+            variant="sex f",
+            path="Quests/Sex/f/5-accept.mp3",
+            text="Hi",
+        ),
+        line("q:7:accept", text="Kobolds."),
+        line(
+            "q:7:accept:narrator x",
+            variant="narrator x",
+            path="Quests/Narrator/x/7-accept.mp3",
+            text="Kobolds.",
+        ),
+        text_only,
+        line("q:9:accept"),
+    ]
+
+
+def test_status_filters_and_line_counts():
+    c = Catalog(status_rows(), [], None, None, True)
+    assert c.count_lines(Filters(status="voiced")) == 3  # 5 accept once, 7, 9
+    assert c.query(Filters(status="voiced"))[0] == 4  # rows: male, female, 7, 9
+    assert c.count_lines(Filters(status="text_only")) == 1
+    assert c.count_lines(Filters(status="audio_only")) == 1
+    assert c.count_lines(Filters(status="no_text")) == 1
+    assert c.count_lines(Filters(variants=True)) == c.count_lines(Filters()) == 4
+    assert c.query(Filters(variants=True))[0] == c.query(Filters())[0] + 2

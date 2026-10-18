@@ -32,6 +32,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 
 from tools.admin.catalog import Catalog, Filters
+from tools.admin.library import library_lines
 from tools.admin.lines import Line, merge
 from tools.admin.packs import find_packs, read_tables
 from tools.admin.texts import annotate, load_texts, npc_names_of
@@ -60,8 +61,8 @@ def build_catalog(
     addons: Path | None, compare_dir: Path | None, data_dir: Path = DATA_DIR
 ) -> Catalog:
     packs = find_packs(addons)
-    lines = merge(packs)
     texts = load_texts(data_dir)
+    lines = library_lines(merge(packs), texts)
     annotate(lines, texts, npc_names_of([read_tables(pack) for pack in packs]))
     return Catalog(lines, packs, compare_dir, addons, texts.has_classic)
 

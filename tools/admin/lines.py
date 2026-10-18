@@ -44,6 +44,31 @@ class Line:
     speaker_name: str | None = None
 
 
+GENDER_LABELS = ("male", "female")
+
+
+def is_variant(line: Line) -> bool:
+    """Another recording of a line (the other sex, another speaker, an alternate
+    narrator), not a line of its own. A $G line's male and female rows are the
+    line itself."""
+    labels = line.variant.split(", ") if line.variant else []
+    if labels and labels[0] in GENDER_LABELS:
+        labels = labels[1:]
+    return bool(labels)
+
+
+def line_key(line: Line) -> str:
+    """The line a row belongs to, its id without the variant: q:<quest>:<event>,
+    g:<speaker>:<hash> or b:<hash>. A $G line's male and female rows and every
+    other recording of it share one."""
+    parts = line.id.split(":")
+    return ":".join(parts[:2] if parts[0] == "b" else parts[:3])
+
+
+def voiced(line: Line) -> bool:
+    return bool(line.files) and not line.missing
+
+
 def items(value: Any) -> list[tuple[Any, Any]]:
     """A Lua table's entries: the parser makes a table keyed 1..n a list."""
     if isinstance(value, list):

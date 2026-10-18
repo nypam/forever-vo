@@ -19,13 +19,14 @@ from typing import Any
 from tools.admin.lines import EVENTS, Line, items
 from tools.config import DATA_DIR
 
-KINDS = ("quests", "gossip", "npcs")
+KINDS = ("quests", "gossip", "books", "npcs")
 
 
 @dataclass
 class Texts:
     quests: dict[str, dict] = field(default_factory=dict)  # "<questID>-<event>"
     gossip: dict[str, dict] = field(default_factory=dict)  # "<speaker>|<hash>"
+    books: dict[str, dict] = field(default_factory=dict)  # "<page hash>"
     npcs: dict[str, dict] = field(default_factory=dict)  # "<speaker>"
     has_classic: bool = False
     zones: dict[int, str] = field(

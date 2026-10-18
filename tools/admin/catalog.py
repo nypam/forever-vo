@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tools.admin.lines import Line
+from tools.admin.lines import Line, is_variant, line_key, voiced
 from tools.admin.packs import Pack
 
 MAX_LIMIT = 500
@@ -34,6 +34,8 @@ class Filters:
     npc: str = ""  # a speaker key, or part of a speaker's name
     q: str = ""  # words, all of which appear in the text or the title
     compare: bool = False  # only lines with a comparison take
+    status: str = ""  # voiced | text_only | audio_only | no_text | yours
+    variants: bool = False  # also other-sex, other-speaker and alternate-narrator rows
 
 
 def listing(root: Path) -> set[str]:
@@ -88,6 +90,10 @@ class Catalog:
         return self.compared.get(line.id, self._pair(line))
 
     def matches(self, line: Line, f: Filters) -> bool:
+        if not f.variants and is_variant(line):
+            return False
+        if f.status and not self.has_status(line, f.status):
+            return False
         if f.kind and line.kind != f.kind:
             return False
         if f.pack and line.pack != f.pack:
@@ -116,6 +122,24 @@ class Catalog:
             if not all(word in haystack for word in f.q.lower().split()):
                 return False
         return not (f.compare and self.compare_path(line) is None)
+
+    def has_status(self, line: Line, status: str) -> bool:
+        if status == "voiced":
+            return voiced(line)
+        if status == "text_only":
+            return not voiced(line) and line.text is not None
+        if status == "audio_only":
+            return voiced(line) and line.text is None
+        if status == "no_text":
+            return line.text is None
+        if status == "yours":
+            return self.compare_path(line) is not None
+        return True
+
+    def count_lines(self, f: Filters) -> int:
+        """Distinct lines among the matching rows: a $G line's male and female
+        rows are one line."""
+        return len({line_key(line) for line in self.lines if self.matches(line, f)})
 
     def query(
         self, f: Filters, offset: int = 0, limit: int = 100
