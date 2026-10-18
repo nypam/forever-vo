@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from tools.browse.lines import Line, merge
 from tools.browse.packs import find_packs, read_tables
 from tools.luatable import parse_value
 
@@ -99,3 +102,241 @@ def test_read_tables_merges_fields(tmp_path):
         "skyborne-female"
     ]  # positional tables are lists
     assert "gossip" not in tables
+
+
+def rows(addons: Path) -> dict[str, Line]:
+    return {line.id: line for line in merge(find_packs(addons))}
+
+
+def quest_pack(addons: Path, body: str, files=(), narrator: str = "", **kw) -> Path:
+    tables = {"Quests.lua": lua("quests", body)}
+    if narrator:
+        tables["Narrator.lua"] = (
+            "local pack = ForeverVO_DataPack"
+            + chr(10)
+            + 'pack.narratorVoices = { "skyborne-female" }'
+            + chr(10)
+            + f"pack.narrator = {narrator}"
+            + chr(10)
+        )
+    return make_pack(
+        addons, kw.pop("folder", "ForeverVO_Data_X"), tables=tables, files=files, **kw
+    )
+
+
+def test_quest_events_and_speakers(tmp_path):
+    quest_pack(
+        tmp_path,
+        '{ [7] = { a=13.1, va="v1", npc=197, c=13.6, vc="v2", ender=250 } }',
+        files=["Quests/7-accept.mp3", "Quests/7-complete.mp3"],
+    )
+    found = rows(tmp_path)
+    accept, complete = found["q:7:accept"], found["q:7:complete"]
+    assert accept.speaker == 197 and accept.files == ["Quests/7-accept.mp3"]
+    assert accept.kind == "accept" and accept.quest_id == 7 and accept.duration == 13.1
+    assert complete.speaker == 250 and complete.voice == "v2"
+    assert "q:7:progress" not in found
+
+
+def test_parts_play_in_order(tmp_path):
+    quest_pack(
+        tmp_path,
+        '{ [9] = { c=3.0, vc="v", cP = { { d=1.1 }, { d=1.4, n=true }, { d=0.6 } } } }',
+        files=[f"Quests/9-p{i}-complete.mp3" for i in (1, 2, 3)],
+    )
+    line = rows(tmp_path)["q:9:complete"]
+    assert line.files == [
+        "Quests/9-p1-complete.mp3",
+        "Quests/9-p2-complete.mp3",
+        "Quests/9-p3-complete.mp3",
+    ]
+    assert line.path == "Quests/9-complete.mp3"
+    assert line.duration == pytest.approx(3.1)
+    assert not line.missing
+
+
+def test_gendered_rows_replace_plain(tmp_path):
+    quest_pack(
+        tmp_path,
+        '{ [5] = { a=2.0, c=3.0, g="a" } }',
+        files=[
+            "Quests/m-5-accept.mp3",
+            "Quests/f-5-accept.mp3",
+            "Quests/5-complete.mp3",
+        ],
+    )
+    found = rows(tmp_path)
+    assert {"q:5:accept:male", "q:5:accept:female", "q:5:complete"} <= set(found)
+    assert "q:5:accept" not in found
+    assert found["q:5:accept:female"].files == ["Quests/f-5-accept.mp3"]
+    assert found["q:5:accept:female"].variant == "female"
+
+
+def test_variants(tmp_path):
+    quest_pack(
+        tmp_path,
+        "{ [5] = { a=2.0, sa={ f=2.1 }, c=3.0,"
+        ' xc={ [1234]={ d=2.0, v="human-female" }, [99]=true } } }',
+        narrator="{ [5] = { [1]={ a=2.2 } } }",
+    )
+    found = rows(tmp_path)
+    assert found["q:5:accept:sex f"].files == ["Quests/Sex/f/5-accept.mp3"]
+    speaker = found["q:5:complete:speaker 1234"]
+    assert speaker.voice == "human-female" and speaker.speaker == 1234
+    assert speaker.files == ["Quests/Speaker/1234/5-complete.mp3"]
+    assert "q:5:complete:speaker 99" not in found
+    narrated = found["q:5:accept:narrator skyborne-female"]
+    assert narrated.path == "Quests/Narrator/skyborne-female/5-accept.mp3"
+    assert narrated.voice == "skyborne-female" and narrated.duration == 2.2
+
+
+def test_narrator_parts_swap(tmp_path):
+    quest_pack(
+        tmp_path,
+        "{ [3] = { a=3.0, aP={ { d=1.0 }, { d=2.0, n=true } } } }",
+        narrator="{ [3] = { [1]={ a=3.1, aP={ [2]=2.2 } } } }",
+    )
+    line = rows(tmp_path)["q:3:accept:narrator skyborne-female"]
+    assert line.files == [
+        "Quests/3-p1-accept.mp3",
+        "Quests/Narrator/skyborne-female/3-p2-accept.mp3",
+    ]
+
+
+def test_gossip_and_books(tmp_path):
+    make_pack(
+        tmp_path,
+        "ForeverVO_Data_X",
+        tables={
+            "Gossip.lua": lua(
+                "gossip",
+                '{ [68] = { { f="68-0135d8e6", h="0135d8e6", t="Nothing like fishing.",'
+                ' d=12.9, v="human-male-official", s={ f=13.0 } },'
+                ' { f="68-aaaaaaaa", h="aaaaaaaa", t="Hmm. <He nods.>", d=2.0,'
+                " P={ { d=1.0 }, { d=1.0, n=true } } } } }",
+            ),
+            "Books.lua": lua(
+                "books",
+                '{ ["003512ce"] = { d=34.8, t="raw", s="prose", b="A Letter" } }',
+            ),
+        },
+    )
+    found = rows(tmp_path)
+    gossip = found["g:68:0135d8e6"]
+    assert gossip.kind == "gossip" and gossip.speaker == 68
+    assert (
+        gossip.text == "Nothing like fishing."
+        and gossip.path == "Gossip/68-0135d8e6.mp3"
+    )
+    assert found["g:68:0135d8e6:sex f"].files == ["Gossip/Sex/f/68-0135d8e6.mp3"]
+    assert found["g:68:aaaaaaaa"].files == [
+        "Gossip/68-p1-aaaaaaaa.mp3",
+        "Gossip/68-p2-aaaaaaaa.mp3",
+    ]
+    book = found["b:003512ce"]
+    assert book.kind == "book" and book.text == "prose" and book.title == "A Letter"
+    assert book.files == ["Books/003512ce-page.mp3"] and book.voice == "narrator"
+
+
+def test_priority_wins(tmp_path):
+    quest_pack(
+        tmp_path,
+        '{ [7] = { a=1.0, va="old" } }',
+        folder="ForeverVO_Data_Base",
+        priority=50,
+    )
+    quest_pack(tmp_path, '{ [7] = { a=1.0, va="new" } }', folder="ForeverVO_Data_New")
+    line = rows(tmp_path)["q:7:accept"]
+    assert line.pack == "ForeverVO_Data_New" and line.voice == "new"
+
+
+def test_missing_file_flagged(tmp_path):
+    quest_pack(tmp_path, "{ [8] = { a=1.0 } }")
+    line = rows(tmp_path)["q:8:accept"]
+    assert line.missing and line.files == ["Quests/8-accept.mp3"]
+
+
+def test_tolerates_old_shapes(tmp_path):
+    quest_pack(
+        tmp_path,
+        "{ [4] = { a=1.0, g=true, aP={ { d=0.5 }, { d=0.5 } } }, [6] = { c=2.0 } }",
+        narrator="{ [4] = { { a=1.1 } } }",
+    )
+    found = rows(tmp_path)
+    assert found["q:4:accept:male"].voice is None
+    assert found["q:4:accept:female"].files == [
+        "Quests/f-4-p1-accept.mp3",
+        "Quests/f-4-p2-accept.mp3",
+    ]
+    assert "q:4:accept:male, narrator skyborne-female" in found
+    assert found["q:6:complete"].speaker is None
+
+
+def test_parts_only_line(tmp_path):
+    # A line that is only a stage direction has parts and no whole-line file
+    # (quest 251's turn-in): cP with no c
+    quest_pack(
+        tmp_path,
+        "{ [251] = { a=8.4, npc=263, cP={ { d=2.8, n=true } }, ender=268 } }",
+        narrator="{ [251] = { { cP={ 2.76 } } } }",
+    )
+    found = rows(tmp_path)
+    line = found["q:251:complete"]
+    assert line.files == ["Quests/251-p1-complete.mp3"] and line.duration == 2.8
+    narrated = found["q:251:complete:narrator skyborne-female"]
+    assert narrated.files == ["Quests/Narrator/skyborne-female/251-p1-complete.mp3"]
+    assert narrated.duration == pytest.approx(2.76)
+
+
+def test_narrator_parts_without_whole(tmp_path):
+    # quest 1139: the alternate recorded only the narrator's part, so its record
+    # holds cP and no c; the speaker's part keeps the pack's own file
+    quest_pack(
+        tmp_path,
+        '{ [1139] = { c=17.8, vc="dwarf-male-standard",'
+        " cP={ { d=4.92, n=true }, { d=18.48 } } } }",
+        narrator="{ [1139] = { { cP={ 5.68 } } } }",
+    )
+    line = rows(tmp_path)["q:1139:complete:narrator skyborne-female"]
+    assert line.files == [
+        "Quests/Narrator/skyborne-female/1139-p1-complete.mp3",
+        "Quests/1139-p2-complete.mp3",
+    ]
+    assert line.duration == pytest.approx(5.68 + 18.48)
+
+
+def test_gossip_narrator_parts_only(tmp_path):
+    make_pack(
+        tmp_path,
+        "ForeverVO_Data_X",
+        tables={
+            "Gossip.lua": lua(
+                "gossip",
+                '{ [-5] = { { f="-5-bbbbbbbb", h="bbbbbbbb", t="<Dusty.> Hm.",'
+                " P={ { d=1.0, n=true }, { d=1.0 } }, nP={ { 1.5 } } } } }",
+            ),
+            "Narrator.lua": 'local pack = X\npack.narratorVoices = { "skyborne-female" }\n',
+        },
+    )
+    line = rows(tmp_path)["g:-5:bbbbbbbb:narrator skyborne-female"]
+    assert line.files == [
+        "Gossip/Narrator/skyborne-female/-5-p1-bbbbbbbb.mp3",
+        "Gossip/-5-p2-bbbbbbbb.mp3",
+    ]
+
+
+def test_gendered_speaker_variant(tmp_path):
+    # an other-speaker recording of a $G line is gendered too: Speaker/<key>/m-<base>
+    quest_pack(
+        tmp_path,
+        '{ [91901] = { c=3.0, g="c", xc={ [256390]={ d=2.5, v="human-female" } } } }',
+        files=["Quests/Speaker/256390/m-91901-complete.mp3"],
+    )
+    found = rows(tmp_path)
+    line = found["q:91901:complete:male, speaker 256390"]
+    assert (
+        line.files == ["Quests/Speaker/256390/m-91901-complete.mp3"]
+        and not line.missing
+    )
+    assert "q:91901:complete:female, speaker 256390" in found
+    assert "q:91901:complete:speaker 256390" not in found
