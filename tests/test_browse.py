@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
 from pathlib import Path
 
 import pytest
 
 from tools.browse.lines import Line, merge
 from tools.browse.packs import find_packs, read_tables
+from tools.browse.texts import annotate, load_texts, npc_names_of, snapshot_zones
 from tools.luatable import parse_value
 
 
@@ -340,3 +343,125 @@ def test_gendered_speaker_variant(tmp_path):
     )
     assert "q:91901:complete:female, speaker 256390" in found
     assert "q:91901:complete:speaker 256390" not in found
+
+
+def write_sources(
+    data: Path, *, classic: dict | None = None, capture: dict | None = None
+):
+    if classic is not None:
+        (data / "bulk").mkdir(parents=True, exist_ok=True)
+        (data / "bulk" / "classic.json").write_text(
+            json.dumps(classic), encoding="utf-8"
+        )
+    if capture is not None:
+        data.mkdir(parents=True, exist_ok=True)
+        (data / "capture.json").write_text(json.dumps(capture), encoding="utf-8")
+
+
+CLASSIC = {
+    "quests": {
+        "7-accept": {"text": "old", "title": "T", "level": 5, "npc": "197"},
+        "7-complete": {"text": "done", "title": "T", "level": 5},
+    },
+    "npcs": {"197": {"name": "Marshal McBride"}},
+}
+CAPTURE = {
+    "quests": {
+        "7-accept": {
+            "text": "new",
+            "title": None,
+            "zone": "Elwynn Forest",
+            "name": "Unknown",
+        }
+    },
+    "gossip": {
+        "68|0135d8e6": {"npc": "68", "zone": "Stormwind City", "name": "Thomas"}
+    },
+    "npcs": {},
+}
+
+
+def test_capture_beats_classic(tmp_path):
+    write_sources(tmp_path, classic=CLASSIC, capture=CAPTURE)
+    texts = load_texts(tmp_path)
+    assert texts.quests["7-accept"] == {
+        "text": "new",
+        "title": "T",
+        "level": 5,
+        "npc": "197",
+        "zone": "Elwynn Forest",
+        "name": "Unknown",
+    }
+    assert texts.has_classic and texts.zones == {}
+
+
+def test_annotate_quest_and_gossip(tmp_path):
+    write_sources(tmp_path / "data", classic=CLASSIC, capture=CAPTURE)
+    quest_pack(tmp_path / "addons", "{ [7] = { a=1.0, npc=197, c=2.0 } }")
+    make_pack(
+        tmp_path / "addons",
+        "ForeverVO_Data_G",
+        tables={
+            "Gossip.lua": lua(
+                "gossip", '{ [68] = { { f="68-0135d8e6", h="0135d8e6", t="Hi." } } }'
+            )
+        },
+    )
+    lines = merge(find_packs(tmp_path / "addons"))
+    annotate(lines, load_texts(tmp_path / "data"), {})
+    found = {line.id: line for line in lines}
+    accept, complete = found["q:7:accept"], found["q:7:complete"]
+    assert accept.text == "new" and complete.text == "done"
+    assert (
+        complete.title == "T"
+        and complete.level == 5
+        and complete.zone == "Elwynn Forest"
+    )
+    assert accept.speaker_name == "Marshal McBride"
+    gossip = found["g:68:0135d8e6"]
+    assert gossip.zone == "Stormwind City" and gossip.speaker_name == "Thomas"
+    assert gossip.text == "Hi."  # the pack's own text stays
+
+
+def test_pack_npc_names_win(tmp_path):
+    make_pack(
+        tmp_path,
+        "ForeverVO_Data_A",
+        tables={"NPCs.lua": lua("npcs", '{ [197] = "Pack Name" }')},
+    )
+    make_pack(
+        tmp_path,
+        "ForeverVO_Data_B",
+        tables={"NPCs.lua": lua("npcs", '{ [197] = "Other", [5] = "Five" }')},
+    )
+    names = npc_names_of([read_tables(p) for p in find_packs(tmp_path)])
+    assert names == {197: "Pack Name", 5: "Five"}
+
+
+def test_snapshot_zones(tmp_path):
+    db = tmp_path / "mangos.sqlite"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE quest_template (entry INTEGER, ZoneOrSort INTEGER)")
+        conn.executemany(
+            "INSERT INTO quest_template VALUES (?, ?)", [(7, 12), (8, -1), (9, 99)]
+        )
+        conn.execute("CREATE TABLE area_template (entry INTEGER, name TEXT)")
+        conn.execute("INSERT INTO area_template VALUES (12, 'Elwynn Forest')")
+    assert snapshot_zones(db) == {7: "Elwynn Forest", 9: "zone 99"}
+
+
+def test_snapshot_zone_fills_quest(tmp_path):
+    db = tmp_path / "data" / "classicdb" / "db" / "mangos.sqlite"
+    db.parent.mkdir(parents=True)
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE quest_template (entry INTEGER, ZoneOrSort INTEGER)")
+        conn.execute("INSERT INTO quest_template VALUES (8, 12)")
+    quest_pack(tmp_path / "addons", "{ [8] = { a=1.0 } }")
+    lines = merge(find_packs(tmp_path / "addons"))
+    annotate(lines, load_texts(tmp_path / "data"), {})
+    assert lines[0].zone == "zone 12" and lines[0].text is None
+
+
+def test_no_sources(tmp_path):
+    texts = load_texts(tmp_path)
+    assert texts.quests == {} and not texts.has_classic and texts.zones == {}
