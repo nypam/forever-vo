@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from tools.browse.catalog import Catalog, Filters
 from tools.browse.lines import Line, merge
 from tools.browse.packs import find_packs, read_tables
 from tools.browse.texts import annotate, load_texts, npc_names_of, snapshot_zones
@@ -465,3 +466,152 @@ def test_snapshot_zone_fills_quest(tmp_path):
 def test_no_sources(tmp_path):
     texts = load_texts(tmp_path)
     assert texts.quests == {} and not texts.has_classic and texts.zones == {}
+
+
+def line(id: str, **kw) -> Line:
+    kind = kw.pop("kind", id.split(":")[2] if id.startswith("q:") else "gossip")
+    quest = int(id.split(":")[1]) if id.startswith("q:") else None
+    base = {
+        "kind": kind,
+        "variant": kw.pop("variant", ""),
+        "quest_id": quest,
+        "speaker": kw.pop("speaker", None),
+        "voice": kw.pop("voice", "v"),
+        "duration": 1.0,
+        "path": kw.pop("path", f"Quests/{quest}-{kind}.mp3"),
+        "files": [],
+        "pack": kw.pop("pack", "ForeverVO_Data_X"),
+    }
+    made = Line(id=id, **base, **kw)
+    made.files = [made.path]
+    return made
+
+
+CATALOG_LINES = [
+    line(
+        "q:5:accept:male",
+        variant="male",
+        path="Quests/m-5-accept.mp3",
+        zone="Elwynn Forest",
+    ),
+    line(
+        "q:5:accept:female",
+        variant="female",
+        path="Quests/f-5-accept.mp3",
+        zone="Elwynn Forest",
+    ),
+    line(
+        "q:7:accept",
+        speaker=197,
+        speaker_name="Marshal McBride",
+        voice="human-male",
+        zone="Elwynn Forest",
+        level=5,
+        text="Kobolds in the mine.",
+        title="Kobold Camp Cleanup",
+    ),
+    line(
+        "q:7:complete",
+        voice="human-male",
+        zone="Elwynn Forest",
+        level=5,
+        title="Kobold Camp Cleanup",
+    ),
+    line(
+        "g:68:0135d8e6",
+        speaker=68,
+        speaker_name="Thomas",
+        voice="human-male",
+        path="Gossip/68-0135d8e6.mp3",
+        text="Nothing like a day at Crystal Lake fishing.",
+    ),
+    line(
+        "q:9:accept",
+        voice="orc-male",
+        pack="ForeverVO_Data_Y",
+        level=None,
+        text="Lok'tar.",
+    ),
+]
+
+
+def compare_dir(tmp_path: Path, *paths: str) -> Path:
+    root = tmp_path / "talk2me"
+    for rel in paths:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_bytes(b"")
+    return root
+
+
+def test_filters_combine():
+    c = Catalog(CATALOG_LINES, [], None, None, True)
+    ids = lambda f: [found.id for found in c.query(f)[1]]
+    assert ids(Filters(kind="accept", voice="human-male", zone="Elwynn Forest")) == [
+        "q:7:accept"
+    ]
+    assert ids(Filters(zone="unknown")) == ["g:68:0135d8e6", "q:9:accept"]
+    assert ids(Filters(level_min=1, level_max=5)) == ["q:7:accept", "q:7:complete"]
+    assert ids(Filters(npc="197")) == ids(Filters(npc="mcbride")) == ["q:7:accept"]
+    assert ids(Filters(q="crystal LAKE")) == ["g:68:0135d8e6"]
+    assert ids(Filters(q="crystal mine")) == []
+    assert ids(Filters(q="kobold camp")) == [
+        "q:7:accept",
+        "q:7:complete",
+    ]  # the title counts
+    assert ids(Filters(quest_id=5)) == ["q:5:accept:male", "q:5:accept:female"]
+    assert ids(Filters(pack="ForeverVO_Data_Y")) == ["q:9:accept"]
+
+
+def test_compare_pairing(tmp_path):
+    root = compare_dir(tmp_path, "Quests/7-accept.mp3", "Quests/5-accept.mp3")
+    c = Catalog(CATALOG_LINES, [], root, None, True)
+    by = {found.id: found for found in CATALOG_LINES}
+    assert c.compare_path(by["q:7:accept"]) == "Quests/7-accept.mp3"
+    assert c.compare_path(by["q:5:accept:male"]) == "Quests/5-accept.mp3"
+    assert c.compare_path(by["q:5:accept:female"]) == "Quests/5-accept.mp3"
+    assert c.compare_path(by["q:7:complete"]) is None
+    facets = c.facets()
+    assert facets["totals"] == {"lines": 6, "with_compare": 3}
+    assert facets["compare_label"] == "talk2me"
+    assert c.query(Filters(compare=True))[0] == 3
+
+
+def test_gendered_compare_prefers_own(tmp_path):
+    root = compare_dir(tmp_path, "Quests/m-5-accept.mp3", "Quests/5-accept.mp3")
+    c = Catalog(CATALOG_LINES, [], root, None, True)
+    assert c.compare_path(CATALOG_LINES[0]) == "Quests/m-5-accept.mp3"
+    assert c.compare_path(CATALOG_LINES[1]) == "Quests/5-accept.mp3"
+
+
+def test_no_compare_folder():
+    c = Catalog(CATALOG_LINES, [], None, None, True)
+    assert c.compare_path(CATALOG_LINES[2]) is None
+    assert (
+        c.facets()["compare_label"] is None
+        and c.facets()["totals"]["with_compare"] == 0
+    )
+
+
+def test_paging_clamped():
+    many = [line(f"q:{i}:accept") for i in range(1, 700)]
+    c = Catalog(many, [], None, None, True)
+    total, page = c.query(Filters(), offset=-5, limit=10_000)
+    assert total == 699 and page == many[:500]
+    assert c.query(Filters(), offset=0, limit=0)[1] == many[:1]
+    assert c.query(Filters(), offset=690, limit=100)[1] == many[690:]
+    assert c.query(Filters(kind="nope")) == (0, [])
+
+
+def test_facets_counts(tmp_path):
+    packs = find_packs(tmp_path)  # none: labels fall back to the folder
+    facets = Catalog(CATALOG_LINES, packs, None, tmp_path, False).facets()
+    assert facets["kinds"][0] == {"value": "accept", "count": 4}
+    assert {"value": "human-male", "count": 3} in facets["voices"]
+    assert facets["zones"][0] == {"value": "Elwynn Forest", "count": 4}
+    assert {"value": "unknown", "count": 2} in facets["zones"]
+    assert (
+        facets["packs"][0]["value"] == "ForeverVO_Data_X"
+        and facets["packs"][0]["count"] == 5
+    )
+    assert facets["has_classic"] is False and facets["packs_found"] == 0
+    assert facets["addons"] == str(tmp_path)
