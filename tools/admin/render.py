@@ -67,7 +67,7 @@ h1{font-size:1.6rem;font-weight:600;letter-spacing:-.02em}
 .pane>p{padding:0 18px 8px}
 .facts{display:grid;padding:4px 18px 16px}
 .facts div{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px dashed var(--border);font-size:13px}
-.facts div span:first-child{color:var(--muted-foreground)}
+.facts div span:first-child:not(:only-child){color:var(--muted-foreground)}
 .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .tile{position:relative;padding:14px 6px 10px;border:1px solid var(--border);border-radius:12px;display:grid;justify-items:center;gap:4px;background:oklch(0.21 0.03 265)}
 .tile .play{width:36px;height:36px}.tile b{font-size:13px;font-weight:500;text-transform:capitalize}.tile small{font-size:11px;color:var(--muted-foreground);min-height:14px}

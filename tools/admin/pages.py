@@ -302,9 +302,13 @@ def soundboard(title: str, clips: list[Clip], empty: str) -> str:
 
 
 def facts(pairs: list[tuple[str, str]]) -> str:
-    """Rows of a character sheet; values are trusted HTML."""
+    """Rows of a character sheet; values are trusted HTML. A row with no label is
+    a list item, read left to right."""
     rows = "".join(
-        f"<div><span>{esc(k)}</span><span>{v}</span></div>" for k, v in pairs
+        f"<div><span>{esc(k)}</span><span>{v}</span></div>"
+        if k
+        else f"<div><span>{v}</span></div>"
+        for k, v in pairs
     )
     return f'<div class="facts">{rows}</div>'
 
@@ -456,7 +460,7 @@ def voice_page(catalog: Catalog, info: VoiceInfo, names: dict[int, str]) -> str:
     )[:20]
     empty = "The reference is composed automatically from the voice's own recordings."
     body = (
-        f'<div><h1 class="mono">{esc(info.name)}</h1><p class="muted">{esc(source)}</p></div>'
+        f'<div><h1>{esc(info.name)}</h1><p class="muted">{esc(source)}</p></div>'
         f'<div class="sheet">{settings}{usage}{soundboard(source, clips, empty)}</div>'
         f'<div><h2 class="sc">Longest lines in this voice</h2></div>{lines_table(catalog, sample)}'
     )
