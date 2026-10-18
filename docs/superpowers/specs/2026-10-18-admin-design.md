@@ -60,10 +60,21 @@ builds on.
    - **Totals:** quests known; lines known by kind (accept, progress, complete,
      gossip, book); lines with audio in the packs, overall and by kind; lines
      with a take in the comparison folder; NPCs that speak; voices in use.
+   - **Decided: a "line" is a distinct line, not a table row.** A line's
+     variant rows (alternate narrators, other sex, other speakers) are not
+     counted as lines; there are about 4,400 of them on today's packs. They are
+     shown as their own total ("variant recordings"). A `$G` line's male and
+     female rows count once. The Lines page shows main rows by default, with a
+     "show variants" toggle, so each dashboard link reproduces its count.
    - **Gaps:** lines with text but no audio; lines with audio but no text;
      progress lines (they aren't voiced unless `fvo-generate --progress`).
-   - **Breakdowns** by level bracket and by zone, with voiced percentages, in
-     the style of Talk2Me's Quests page.
+   - **Breakdowns** by level bracket and by zone, in the style of Talk2Me's
+     Quests page. **Decided:** they count lines (known, voiced, your takes, with
+     a voiced percentage), not quest states. "Partly voiced quests" can't be
+     reproduced by a line filter, and progress text, which they don't voice by
+     default, would leave almost every quest partly voiced. Progress gets its
+     own column. The level breakdown needs `bulk/classic.json`; without it,
+     the dashboard says so, like the Classic-text notice.
    - **Links:** every number opens the Lines page filtered to exactly those
      lines.
 2. **Lines** (`/lines`). Talk2Me's lines table on forever-vo's catalogue.
@@ -87,11 +98,19 @@ builds on.
    - **All its lines** with both players.
 4. **Voice page** (`/voice/<name>`). Where tuning lives. For one of their voices
    (`human-male-official`, `narrator`, ...):
-   - **Clone source:** the Blizzard clips their reference is built from, as last
-     picked in `tools/data/source_picks.json`, each playable.
-   - **Settings:** its Chatterbox settings from `configs/tts.toml` (the defaults
-     when it has no entry), its fallbacks and borrowed clips from
-     `configs/voices.toml`, and any `[voices.speakers]` pins. Shown, not edited.
+   - **Clone source:** the Blizzard clips their reference is built from (see
+     Data), each playable.
+   - **Settings:** shown as configured, not edited:
+     - its own `[tts.voices.<voice>]` row from `configs/tts.toml` if it has one,
+       else "no row of its own" with the `[tts]` defaults
+     - its fallback chain from `configs/voices.toml`, as text
+     - any `[voices.speakers]` pins
+
+     **Decided:** this is a plain read of the config, labelled "as configured".
+     It doesn't re-implement `generate`'s resolution (a variant voice takes
+     its race's row, and a voice with no clip takes its fallback's). That would
+     mean re-implementing code that can't be imported, and it depends on
+     gitignored reference wavs.
    - **Who uses it:** the NPCs on it, with counts and links, and a sample of its
      lines with players.
 5. **Voices** (`/voices`). Every voice in use: line count, NPC count, whether it
@@ -117,8 +136,11 @@ builds on.
 ## Anti-goals
 
 - **Changing anything a player or the pipeline reads:** packs, `configs/`,
-  `capture.json`, `bulk/`, `sound_index.json`. The only thing written is the
-  Blizzard clip cache below.
+  `capture.json`, `bulk/`, `sound_index.json`. The only things written are
+  gitignored caches, through `tools.wowdata`'s own helpers:
+  - `tools/data/casc/<build>/` (clips)
+  - `tools/data/db2/` (tables such as SoundKitEntry, fetched on first use)
+  - `tools/voices/raw/admin/` (links to the clips the page plays)
 - **Importing `tools.generate` or `tools.audition`,** directly or indirectly.
   That pulls in `fcntl` and torch, and the admin would stop starting on Windows.
   `tools.wowdata`, `tools.config`, `tools.soundpaths` and `tools.textkey` are
@@ -166,10 +188,10 @@ builds on.
 | Lines with audio but no known text | pack rows that `annotate` leaves with `text` None |
 | A known line paired with its pack row | quests by (quest id, event). Gossip by speaker plus `tools.textkey.text_key` of the text, which equals the pack's gossip `h`, with `$G` text resolved as the pack does |
 | NPC name, sex, display ID, model file ID, zones | the packs' `npcs`/`sexes`/`models`, then `npcs[...]` and the `zone`/`mapID` of entries in `capture.json` and `bulk/*.json` |
-| NPCSounds set of an NPC | `tools.wowdata.display_sound_set(displayID)`. Forever's own NPCs often have only a model file ID: try `wowdata`'s model-to-display helpers, and show "no Blizzard set known" when nothing resolves |
+| NPCSounds set of an NPC | `tools.wowdata.display_sound_set(displayID)`, when a display ID is known. Classic NPCs get one from `bulk/classic.json` (VMaNGOS) once `fvo-classicdb` has run; captures and packs almost never carry one (9 of 1,867 captured NPCs). **Decided:** with no display ID, no set is guessed from the model, because a model maps to several sets (the human male model to 15). The soundboard then plays the Blizzard clips of the NPC's *voice* (the voice page's clone source), labelled "Blizzard clips behind <voice>", not as the NPC's own set. No model-to-display code |
 | Barks of a set | the NPCSounds row's sound kits (greeting, farewell, annoyed) through `wowdata.load_db2`. Talk2Me's `sources.voice_set_barks` reads the same tables and shows the joins |
 | Blizzard clip audio | `tools.wowdata.fetch_file(fdid, dest)`, which fetches from wago.tools on first use and caches under `tools/voices/raw/admin/` (gitignored). The page plays `.ogg`. When offline it shows "clip not available offline" and the page still works |
-| A voice's picked clips | the last entry of `tools/data/source_picks.json[voice]` (`clips` are file IDs) |
+| A voice's clone source | **Decided:** the pick in use, `[voices.sources.<voice>]` in `configs/voices.sources.toml` (`clips`, plus `build` when it is not the default), through `tools.config.load_config()`. `tools/data/source_picks.json` is audition's undo history (newest first) and is not the source. A voice with no pick that borrows another voice's clip (`[voices.fallbacks]`) shows that voice's pick, labelled "borrowed from <voice>". A voice with neither says "automatic reference (no clips picked by ear)", with no clips listed |
 | A voice's settings | `configs/tts.toml` and `configs/voices.toml`, through `tools.config.load_config()` (read only) |
 | Your takes | the comparison folder, through `Catalog.compare_path` |
 
