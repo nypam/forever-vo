@@ -12,6 +12,14 @@ from typing import Any
 
 import pytest
 
+from tools.admin import blizzard
+from tools.admin.blizzard import (
+    Bark,
+    ClipUnavailable,
+    clip_file,
+    npc_sound_set,
+    set_barks,
+)
 from tools.admin.catalog import Catalog, Filters
 from tools.admin.library import library_lines
 from tools.admin.lines import Line, merge, natural
@@ -976,3 +984,96 @@ def test_voice_info_fallback_cycle():
     assert info is not None and info.fallbacks == [
         "bb-male"
     ]  # stops before aa-male again
+
+
+NPC_SOUNDS = {
+    48: {
+        "ID": "48",
+        "SoundID_0": "10",
+        "SoundID_1": "11",
+        "SoundID_2": "12",
+        "SoundID_3": "0",
+    }
+}
+SOUND_KIT_ENTRY = {
+    1: {"ID": "1", "SoundKitID": "10", "FileDataID": "900"},
+    2: {"ID": "2", "SoundKitID": "12", "FileDataID": "950"},
+    3: {"ID": "3", "SoundKitID": "10", "FileDataID": "901"},
+    4: {"ID": "4", "SoundKitID": "99", "FileDataID": "1"},
+}
+
+
+@pytest.fixture
+def wago(monkeypatch, tmp_path):
+    """blizzard's wago access, offline: two db2 tables and a fetch that writes an Ogg."""
+    fetched: list[tuple[int, Path, str]] = []
+
+    def load_db2(table: str, build: str = "") -> dict[int, dict[str, str]]:
+        return {"NPCSounds": NPC_SOUNDS, "SoundKitEntry": SOUND_KIT_ENTRY}[table]
+
+    def fetch_file(fdid: int, dest: Path, build: str = "") -> Path:
+        fetched.append((fdid, dest, build))
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"OggS" + bytes(64))
+        return dest
+
+    monkeypatch.setattr(blizzard, "load_db2", load_db2)
+    monkeypatch.setattr(blizzard, "fetch_file", fetch_file)
+    monkeypatch.setattr(
+        blizzard, "display_sound_set", lambda display: 48 if display == 1883 else None
+    )
+    monkeypatch.setattr(blizzard, "VOICES_DIR", tmp_path / "voices")
+    blizzard.kit_files.cache_clear()
+    yield fetched
+    blizzard.kit_files.cache_clear()
+
+
+@pytest.fixture
+def offline(monkeypatch):
+    import requests
+
+    def refuse(*args, **kwargs):
+        raise requests.ConnectionError("offline")
+
+    monkeypatch.setattr(blizzard, "load_db2", refuse)
+    monkeypatch.setattr(blizzard, "fetch_file", refuse)
+    monkeypatch.setattr(blizzard, "display_sound_set", refuse)
+    blizzard.kit_files.cache_clear()
+    yield
+    blizzard.kit_files.cache_clear()
+
+
+def test_set_barks_join(wago):
+    assert set_barks(48) == [
+        Bark(900, "greeting"),
+        Bark(901, "greeting"),
+        Bark(950, "annoyed"),
+    ]
+    assert set_barks(7) == []
+    assert npc_sound_set(1883) == 48 and npc_sound_set(None) is None
+
+
+def test_clip_file_caches_under_raw_admin(wago, tmp_path):
+    path = clip_file(900)
+    assert path.name == "900.ogg" and path.read_bytes().startswith(b"OggS")
+    assert path.parent.parent == tmp_path / "voices" / "raw" / "admin"
+    fdid, dest, build = wago[0]
+    assert (fdid, dest) == (900, path) and build  # the default build
+    assert clip_file(901, "1.60.1.69977").parent.name == "1.60.1.69977"
+
+
+def test_clip_file_refuses_a_dud(wago, monkeypatch):
+    def empty(fdid: int, dest: Path, build: str = "") -> Path:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"")
+        return dest
+
+    monkeypatch.setattr(blizzard, "fetch_file", empty)
+    with pytest.raises(ClipUnavailable):
+        clip_file(902)
+
+
+def test_clip_unavailable_offline(offline):
+    with pytest.raises(ClipUnavailable):
+        clip_file(900)
+    assert set_barks(48) == [] and npc_sound_set(1883) is None

@@ -1,0 +1,82 @@
+"""Blizzard's own recordings behind a voice: an NPCSounds set's barks, and any
+clip by FileDataID, fetched from wago.tools through tools.wowdata.
+
+Every humanoid display is cast with an NPCSounds set, whose four sound kits are
+its greeting, farewell and annoyed barks (and a rarely used fourth). Clips are
+fetched on demand, never while a page renders, and cached under
+tools/voices/raw/admin/<build>/ (wowdata also keeps its own copy in
+tools/data/casc/). Offline, or for a clip this build lacks, nothing raises past
+this module: barks are an empty list and a clip is ClipUnavailable.
+"""
+
+from __future__ import annotations
+
+import functools
+from dataclasses import dataclass
+from pathlib import Path
+
+from tools.config import BETA_BUILD, VOICES_DIR
+from tools.wowdata import display_sound_set, fetch_file, is_dud, load_db2
+
+KITS = ("greeting", "farewell", "annoyed", "other")  # NPCSounds.SoundID_0..3
+
+
+@dataclass(frozen=True)
+class Bark:
+    fdid: int
+    kit: str
+
+
+class ClipUnavailable(Exception):
+    """wago could not give this clip: offline, not in the build, or a dud file."""
+
+
+def npc_sound_set(display_id: int | None) -> int | None:
+    """The NPCSounds set a creature display is cast with, or None."""
+    if not display_id:
+        return None
+    try:
+        return display_sound_set(display_id)
+    except Exception:  # network or table trouble: no set rather than no page
+        return None
+
+
+@functools.cache
+def kit_files() -> dict[str, tuple[int, ...]]:
+    """SoundKitID -> its FileDataIDs, in table order."""
+    kits: dict[str, list[int]] = {}
+    for row in load_db2("SoundKitEntry").values():
+        kits.setdefault(row["SoundKitID"], []).append(int(row["FileDataID"]))
+    return {kit: tuple(files) for kit, files in kits.items()}
+
+
+def set_barks(set_id: int) -> list[Bark]:
+    """Every bark of an NPCSounds set, greetings first and annoyed last."""
+    try:
+        row = load_db2("NPCSounds").get(set_id)
+        files = kit_files() if row else {}
+    except Exception:
+        return []
+    if not row:
+        return []
+    barks = []
+    for i, kit in enumerate(KITS):
+        kit_id = row.get(f"SoundID_{i}") or "0"
+        if kit_id != "0":
+            barks += [Bark(fdid, kit) for fdid in files.get(kit_id, ())]
+    return barks
+
+
+def clip_file(fdid: int, build: str | None = None) -> Path:
+    """The clip on disk, fetched from wago.tools the first time."""
+    build = build or BETA_BUILD
+    dest = VOICES_DIR / "raw" / "admin" / build / f"{fdid}.ogg"
+    try:
+        path = fetch_file(fdid, dest, build)
+        if is_dud(path):
+            raise ClipUnavailable(f"{fdid} is not audio in build {build}")
+    except ClipUnavailable:
+        raise
+    except Exception as error:
+        raise ClipUnavailable(f"{fdid}: {error}") from error
+    return path
