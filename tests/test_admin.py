@@ -20,7 +20,8 @@ from tools.admin.blizzard import (
     npc_sound_set,
     set_barks,
 )
-from tools.admin.catalog import Catalog, Filters
+from tools.admin.catalog import Catalog, Filters, filters_from_query
+from tools.admin.dashboard import summary
 from tools.admin.library import library_lines
 from tools.admin.lines import Line, merge, natural
 from tools.admin.packs import find_packs, read_tables
@@ -1077,3 +1078,85 @@ def test_clip_unavailable_offline(offline):
     with pytest.raises(ClipUnavailable):
         clip_file(900)
     assert set_barks(48) == [] and npc_sound_set(1883) is None
+
+
+def dashboard_rows() -> list[Line]:
+    rows = status_rows()
+    for row in rows:
+        if row.quest_id == 5:
+            row.level, row.zone = 4, "Elwynn Forest"
+        elif row.quest_id == 7:
+            row.level, row.zone = 15, "Westfall"
+    return [
+        *rows,
+        line(
+            "g:68:0135d8e6", speaker=68, path="Gossip/68-0135d8e6.mp3", text="Fishing."
+        ),
+    ]
+
+
+def test_dashboard_links_reproduce_counts(tmp_path):
+    compare = compare_dir(tmp_path, "Quests/5-accept.mp3", "Quests/7-progress.mp3")
+    c = Catalog(dashboard_rows(), [], compare, None, True)
+    s = summary(c, npc_count=2, voice_count=3)
+    assert s.totals[0].label == "Quests known" and s.totals[0].value == 3
+    by_label = {count.label: count.value for count in s.totals}
+    assert by_label["Lines known"] == 5 and by_label["Voiced"] == 4
+    assert by_label["Text only"] == 1 and by_label["Yours"] == 2
+    assert by_label["Variant recordings"] == 2 and by_label["NPCs speaking"] == 2
+    line_counts = [
+        *s.totals[1:6],
+        *(x for row in s.by_kind + s.by_level + s.by_zone for x in row),
+    ]
+    for count in line_counts:
+        assert c.count_lines(filters_from_query(count.query)) == count.value, count
+
+
+def test_level_brackets_and_zones():
+    s = summary(
+        Catalog(dashboard_rows(), [], None, None, False), npc_count=0, voice_count=0
+    )
+    assert [row[0].label for row in s.by_level] == [
+        "1-10",
+        "11-20",
+        "21-30",
+        "31-40",
+        "41-50",
+        "51-60",
+        "61-70",
+        "unknown",
+    ]
+    assert [x.value for x in s.by_level[0]] == [
+        1,
+        1,
+        0,
+    ]  # quest 5: known, voiced, yours
+    assert s.by_level[-1][0].value == 2  # quest 9 and the gossip line
+    assert [row[0].label for row in s.by_zone] == [
+        "Westfall",
+        "Elwynn Forest",
+        "unknown",
+    ]
+    assert [row[0].label for row in s.by_kind] == [
+        "accept",
+        "progress",
+        "complete",
+        "gossip",
+        "book",
+    ]
+    assert not s.has_classic
+
+
+def test_filters_from_query_is_lenient():
+    f = filters_from_query(
+        "kind=progress&status=text_only&level_min=1.5&quest=abc&variants=1&level_unknown=1"
+    )
+    assert (f.kind, f.status, f.level_min, f.quest_id, f.variants, f.level_unknown) == (
+        "progress",
+        "text_only",
+        1,
+        None,
+        True,
+        True,
+    )
+    assert filters_from_query("") == Filters()

@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import os
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlencode
 
 from tools.admin.lines import Line, is_variant, line_key, voiced
 from tools.admin.packs import Pack
@@ -30,12 +31,62 @@ class Filters:
     zone: str = ""  # "" any, "unknown" for lines with none
     level_min: int | None = None  # a line with no level never matches a bound
     level_max: int | None = None
+    level_unknown: bool = False  # only lines with no known level
     quest_id: int | None = None
     npc: str = ""  # a speaker key, or part of a speaker's name
     q: str = ""  # words, all of which appear in the text or the title
     compare: bool = False  # only lines with a comparison take
     status: str = ""  # voiced | text_only | audio_only | no_text | yours
     variants: bool = False  # also other-sex, other-speaker and alternate-narrator rows
+
+
+QUERY_NAMES = {"quest_id": "quest"}  # Filters field -> its name in a URL
+BOOL_FIELDS = {"compare", "variants", "level_unknown"}
+INT_FIELDS = {"level_min", "level_max", "quest_id"}
+
+
+def whole(value: str) -> int | None:
+    """A number filter from the query string, leniently: "7", "7.0" and "1.5"
+    read as whole numbers, and anything else ("abc", "") as no filter, so a
+    bookmarked or half-typed URL never fails the request."""
+    try:
+        return int(float(value))
+    except (ValueError, OverflowError):
+        return None
+
+
+def filters_from_query(query: str) -> Filters:
+    """The Lines page's filters from its query string; unknown names are ignored."""
+    given = {k: v[-1] for k, v in parse_qs(query, keep_blank_values=True).items()}
+    values: dict[str, Any] = {}
+    for field in fields(Filters):
+        raw = given.get(QUERY_NAMES.get(field.name, field.name))
+        if raw is None:
+            continue
+        if field.name in BOOL_FIELDS:
+            values[field.name] = raw.lower() in ("1", "true", "on", "yes")
+        elif field.name in INT_FIELDS:
+            values[field.name] = whole(raw)
+        else:
+            values[field.name] = raw.strip()
+    return Filters(**values)
+
+
+def query_of(f: Filters) -> str:
+    """The query string that filters_from_query reads back as `f`."""
+    default = Filters()
+    pairs = []
+    for field in fields(Filters):
+        value = getattr(f, field.name)
+        if value == getattr(default, field.name):
+            continue
+        pairs.append(
+            (
+                QUERY_NAMES.get(field.name, field.name),
+                "1" if value is True else str(value),
+            )
+        )
+    return urlencode(pairs)
 
 
 def listing(root: Path) -> set[str]:
@@ -107,6 +158,8 @@ class Catalog:
         if f.level_min is not None and (line.level is None or line.level < f.level_min):
             return False
         if f.level_max is not None and (line.level is None or line.level > f.level_max):
+            return False
+        if f.level_unknown and line.level is not None:
             return False
         if f.quest_id is not None and line.quest_id != f.quest_id:
             return False

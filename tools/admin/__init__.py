@@ -26,12 +26,12 @@ import webbrowser
 from importlib import resources
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
-from tools.admin.catalog import Catalog, Filters
+from tools.admin.catalog import Catalog, filters_from_query, whole
 from tools.admin.library import library_lines
 from tools.admin.lines import Line, merge
 from tools.admin.packs import find_packs, read_tables
@@ -45,16 +45,6 @@ SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 def addons_from_env() -> Path:
     override = os.environ.get("AUDITION_ADDONS")
     return Path(override) if override else ADDONS_DIR
-
-
-def whole(value: str) -> int | None:
-    """A number filter from the query string, leniently: "7", "7.0" and "1.5"
-    read as whole numbers, and anything else ("abc", "") as no filter, so a
-    bookmarked or half-typed URL never fails the request."""
-    try:
-        return int(float(value))
-    except (ValueError, OverflowError):
-        return None
 
 
 def build_catalog(
@@ -107,34 +97,13 @@ def create_app(catalog: Catalog) -> FastAPI:
         return catalog.facets()
 
     @app.get("/api/lines")
-    def lines(
-        kind: str = "",
-        pack: str = "",
-        voice: str = "",
-        zone: str = "",
-        level_min: str = "",
-        level_max: str = "",
-        quest: str = "",
-        npc: str = "",
-        q: str = "",
-        compare: bool = False,
-        offset: str = "",
-        limit: str = "",
-    ) -> dict[str, Any]:
-        filters = Filters(
-            kind=kind,
-            pack=pack,
-            voice=voice,
-            zone=zone,
-            level_min=whole(level_min),
-            level_max=whole(level_max),
-            quest_id=whole(quest),
-            npc=npc,
-            q=q,
-            compare=compare,
-        )
+    def lines(request: Request) -> dict[str, Any]:
+        query = request.url.query
+        given = {k: v[-1] for k, v in parse_qs(query).items()}
         total, page_rows = catalog.query(
-            filters, offset=whole(offset) or 0, limit=whole(limit) or 100
+            filters_from_query(query),
+            offset=whole(given.get("offset", "")) or 0,
+            limit=whole(given.get("limit", "")) or 100,
         )
         return {"total": total, "rows": [row(line) for line in page_rows]}
 
