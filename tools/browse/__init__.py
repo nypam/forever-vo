@@ -46,6 +46,16 @@ def addons_from_env() -> Path:
     return Path(override) if override else ADDONS_DIR
 
 
+def whole(value: str) -> int | None:
+    """A number filter from the query string, leniently: "7", "7.0" and "1.5"
+    read as whole numbers, and anything else ("abc", "") as no filter, so a
+    bookmarked or half-typed URL never fails the request."""
+    try:
+        return int(float(value))
+    except (ValueError, OverflowError):
+        return None
+
+
 def build_catalog(
     addons: Path | None, compare_dir: Path | None, data_dir: Path = DATA_DIR
 ) -> Catalog:
@@ -101,28 +111,30 @@ def create_app(catalog: Catalog) -> FastAPI:
         pack: str = "",
         voice: str = "",
         zone: str = "",
-        level_min: int | None = None,
-        level_max: int | None = None,
-        quest: int | None = None,
+        level_min: str = "",
+        level_max: str = "",
+        quest: str = "",
         npc: str = "",
         q: str = "",
         compare: bool = False,
-        offset: int = 0,
-        limit: int = 100,
+        offset: str = "",
+        limit: str = "",
     ) -> dict[str, Any]:
         filters = Filters(
             kind=kind,
             pack=pack,
             voice=voice,
             zone=zone,
-            level_min=level_min,
-            level_max=level_max,
-            quest_id=quest,
+            level_min=whole(level_min),
+            level_max=whole(level_max),
+            quest_id=whole(quest),
             npc=npc,
             q=q,
             compare=compare,
         )
-        total, page_rows = catalog.query(filters, offset=offset, limit=limit)
+        total, page_rows = catalog.query(
+            filters, offset=whole(offset) or 0, limit=whole(limit) or 100
+        )
         return {"total": total, "rows": [row(line) for line in page_rows]}
 
     @app.get("/api/audio/pack/{pack}/{path:path}")

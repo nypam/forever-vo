@@ -18,7 +18,7 @@
 - Dependencies: add the group `browse = ["fastapi", "uvicorn"]` under `[dependency-groups]` and the script `fvo-browse = "tools.browse:main"` under `[project.scripts]`. Do not touch `[project].dependencies` or `default-groups`. Run `uv lock` afterwards.
 - Default host `127.0.0.1`, port `8766`.
 - Packs: `--addons`, else `AUDITION_ADDONS`, else `tools.config.BETA_DIR / "Interface" / "AddOns"`. A pack is a `ForeverVO_Data*` folder that has `Sounds/`. Its name, version and priority come from `Data/Pack.lua`.
-- Pack order, where the addon looks first: priority descending, then folder name ascending. The first pack that has a row wins.
+- Pack order, where the addon looks first (Packs.lua RegisterPack): the retired folders (`ForeverVO_Data_Base`, `ForeverVO_Data_Base_Endgame`, `ForeverVO_Data_Forever`) get priority -1000 and a " (retired)" label; then priority descending, then pack label ascending. The first pack that has a row wins.
 - Comparison folder: `--compare`, else `FVO_COMPARE`. Its label is the folder's name.
 - Style: ruff check and format clean; tests in `tests/test_browse.py`; read `CLAUDE.md` first.
 - Commands: tests `uv run --no-group tts --group dev pytest tests/test_browse.py -v`; lint `uv run --no-group tts --group dev ruff check tools/browse tools/luatable.py tests/test_browse.py` and `uv run --no-group tts --group dev ruff format --check tools/browse tools/luatable.py tests/test_browse.py`.

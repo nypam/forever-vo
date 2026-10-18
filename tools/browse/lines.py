@@ -98,6 +98,16 @@ def joined(*labels: str) -> str:
     return ", ".join(label for label in labels if label)
 
 
+def other_sex_voice(recorded: Any, letter: str) -> str | None:
+    """The voice of a line's other-sex file, as OtherSex in Packs.lua names it:
+    the recorded voice's race with the other sex (human-male-official, f ->
+    human-female). None when the recorded voice names no race."""
+    if not isinstance(recorded, str) or "-" not in recorded:
+        return None
+    race = recorded.split("-", 1)[0]
+    return f"{race}-{'male' if letter == 'm' else 'female'}"
+
+
 def gendered(g: Any, letter: str) -> bool:
     return g is True or (isinstance(g, str) and letter in g)
 
@@ -144,7 +154,7 @@ def quest_lines(pack: Pack, tables: dict[str, Any]) -> list[Line]:
                 continue
             speaker = npc if x == "a" else (ender if ender is not None else npc)
             parts = parts_of(entry.get(f"{x}P"))
-            base_line = {
+            base_line: dict[str, Any] = {
                 "kind": event,
                 "quest_id": qid,
                 "speaker": speaker,
@@ -178,7 +188,7 @@ def quest_lines(pack: Pack, tables: dict[str, Any]) -> list[Line]:
                             Line(
                                 id=f"q:{qid}:{event}:{joined(sex, f'sex {letter}')}",
                                 variant=joined(sex, f"sex {letter}"),
-                                voice=entry.get(f"v{x}"),
+                                voice=other_sex_voice(entry.get(f"v{x}"), letter),
                                 duration=number(d),
                                 path=path,
                                 files=[path],
@@ -239,7 +249,7 @@ def gossip_lines(pack: Pack, tables: dict[str, Any]) -> list[Line]:
             head, _, tail = name.rpartition("-")
             parts = parts_of(entry.get("P"))
             prefixes = GENDERS if entry.get("g") else (("", ""),)
-            common = {
+            common: dict[str, Any] = {
                 "kind": "gossip",
                 "quest_id": None,
                 "speaker": key,
@@ -274,7 +284,7 @@ def gossip_lines(pack: Pack, tables: dict[str, Any]) -> list[Line]:
                             Line(
                                 id=f"{ident}:{variant}",
                                 variant=variant,
-                                voice=entry.get("v"),
+                                voice=other_sex_voice(entry.get("v"), letter),
                                 duration=number(d),
                                 path=path,
                                 files=[path],
@@ -313,7 +323,7 @@ def book_lines(pack: Pack, tables: dict[str, Any]) -> list[Line]:
     for key, entry in items(tables.get("books")):
         if not isinstance(entry, dict):
             continue
-        common = {
+        common: dict[str, Any] = {
             "kind": "book",
             "quest_id": None,
             "speaker": None,

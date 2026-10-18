@@ -3,7 +3,7 @@
 A pack's tables are Lua files of `pack.<field> = { ... }` assignments
 (tools/generate.py writes them); Pack.lua names the pack, its version and its
 priority (tools/release_pack.py). The order is the addon's (Packs.lua): higher
-priority first, then folder name.
+priority first, then pack name, with the retired packs last whatever they say.
 """
 
 from __future__ import annotations
@@ -22,6 +22,14 @@ from tools.luatable import parse_value
 PACK_FIELD = re.compile(r'^\s*(name|priority|version)\s*=\s*"?([^",]+)"?', re.MULTILINE)
 ASSIGNMENT = re.compile(r"^pack\.(\w+)\s*=", re.MULTILINE)
 TABLE_FILES = ("Quests.lua", "Gossip.lua", "Books.lua", "Narrator.lua", "NPCs.lua")
+# RETIRED_FOLDERS in Packs.lua: packs a player may still have from before
+# 2026-10-06, consulted only for what the current packs lack
+RETIRED_FOLDERS = {
+    "ForeverVO_Data_Base",
+    "ForeverVO_Data_Base_Endgame",
+    "ForeverVO_Data_Forever",
+}
+RETIRED_PRIORITY = -1000
 
 
 @dataclass(frozen=True)
@@ -50,16 +58,13 @@ def find_packs(addons: Path | None) -> list[Pack]:
         priority = 0
         with contextlib.suppress(ValueError):
             priority = int(fields.get("priority", 0))
+        label = fields.get("name", folder.name)
+        if folder.name in RETIRED_FOLDERS:
+            label, priority = f"{label} (retired)", RETIRED_PRIORITY
         packs.append(
-            Pack(
-                folder.name,
-                fields.get("name", folder.name),
-                fields.get("version", ""),
-                priority,
-                folder,
-            )
+            Pack(folder.name, label, fields.get("version", ""), priority, folder)
         )
-    return sorted(packs, key=lambda p: (-p.priority, p.folder))
+    return sorted(packs, key=lambda p: (-p.priority, p.label))
 
 
 @functools.cache
