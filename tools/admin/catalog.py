@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tools.browse.lines import Line
-from tools.browse.packs import Pack
+from tools.admin.lines import Line
+from tools.admin.packs import Pack
 
 MAX_LIMIT = 500
 

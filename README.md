@@ -104,9 +104,9 @@ WOW_DIR="$HOME/Games/World of Warcraft" ./tools/run.sh audition
 AUDITION_ADDONS="$PWD/addons" ./tools/run.sh audition
 ```
 
-### Browsing the voice packs
+### The admin
 
-`fvo-browse` opens a local page (port 8766) listing every line in the installed
+`fvo-admin` opens a local page (port 8766) listing every line in the installed
 voice packs. You can filter by kind, pack, voice, zone, level, quest, NPC or
 words, and play each line the way the addon plays it: a line with stage
 directions plays part by part. It only reads, and it needs no GPU stack, so it
@@ -114,13 +114,13 @@ runs on Windows too. It finds the packs the way audition does (`--addons`, else
 `AUDITION_ADDONS`, else `WOW_DIR`).
 
 ```sh
-uv run --no-group tts --group browse fvo-browse --open
+uv run --no-group tts --group admin fvo-admin --open
 ```
 
 ```powershell
 # Windows: point WOW_DIR at the folder that holds _classic_beta_
 $env:WOW_DIR = "C:\Program Files (x86)\World of Warcraft"
-uv run --no-group tts --group browse fvo-browse --open
+uv run --no-group tts --group admin fvo-admin --open
 ```
 
 Quest text for Classic's quests comes from `tools/data/bulk/classic.json`. Run

@@ -353,7 +353,7 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
-browse = [
+admin = [
     { name = "fastapi" },
     { name = "uvicorn" },
 ]
@@ -391,7 +391,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-browse = [
+admin = [
     { name = "fastapi" },
     { name = "uvicorn" },
 ]

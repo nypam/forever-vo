@@ -16,7 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from tools.browse.packs import Pack, read_tables
+from tools.admin.packs import Pack, read_tables
 
 EVENTS = (("accept", "a"), ("progress", "p"), ("complete", "c"))
 GENDERS = (("male", "m-"), ("female", "f-"))

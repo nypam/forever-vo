@@ -1,4 +1,4 @@
-"""The pack browser (tools/browse): installed voice packs read into playable lines."""
+"""The pack browser (tools/admin): installed voice packs read into playable lines."""
 
 from __future__ import annotations
 
@@ -11,10 +11,10 @@ from typing import Any
 
 import pytest
 
-from tools.browse.catalog import Catalog, Filters
-from tools.browse.lines import Line, merge
-from tools.browse.packs import find_packs, read_tables
-from tools.browse.texts import annotate, load_texts, npc_names_of, snapshot_zones
+from tools.admin.catalog import Catalog, Filters
+from tools.admin.lines import Line, merge
+from tools.admin.packs import find_packs, read_tables
+from tools.admin.texts import annotate, load_texts, npc_names_of, snapshot_zones
 from tools.luatable import parse_value
 
 
@@ -625,7 +625,7 @@ def test_facets_counts(tmp_path):
 def client(tmp_path):
     from fastapi.testclient import TestClient
 
-    from tools.browse import build_catalog, create_app
+    from tools.admin import build_catalog, create_app
 
     quest_pack(
         tmp_path / "addons",
@@ -659,7 +659,7 @@ def test_lines_api_and_audio(client):
 def test_missing_row_has_no_urls(tmp_path):
     from fastapi.testclient import TestClient
 
-    from tools.browse import build_catalog, create_app
+    from tools.admin import build_catalog, create_app
 
     quest_pack(tmp_path / "addons", "{ [8] = { a=1.0 } }")
     c = TestClient(create_app(build_catalog(tmp_path / "addons", None, tmp_path)))
@@ -684,7 +684,7 @@ def test_audio_path_refused(client):
 def test_no_packs_found(tmp_path):
     from fastapi.testclient import TestClient
 
-    from tools.browse import build_catalog, create_app
+    from tools.admin import build_catalog, create_app
 
     c = TestClient(create_app(build_catalog(tmp_path / "missing", None, tmp_path)))
     facets = c.get("/api/facets").json()
@@ -695,11 +695,11 @@ def test_no_packs_found(tmp_path):
     assert c.get("/api/audio/compare/Quests/7-accept.mp3").status_code == 404
 
 
-def test_browse_does_not_import_the_pipeline():
+def test_admin_does_not_import_the_pipeline():
     from tools.config import ROOT
 
     probe = (
-        "import sys, tools.browse; "
+        "import sys, tools.admin; "
         "print(','.join(m for m in ('tools.generate', 'tools.audition', 'torch', "
         "'chatterbox', 'fcntl') if m in sys.modules))"
     )

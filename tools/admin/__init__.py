@@ -1,7 +1,7 @@
 """Pack browser: every line in the installed voice packs, filterable and playable.
 
-    uv run --no-group tts --group browse fvo-browse            # http://127.0.0.1:8766
-    uv run --no-group tts --group browse fvo-browse --open --compare <folder>
+    uv run --no-group tts --group admin fvo-admin            # http://127.0.0.1:8766
+    uv run --no-group tts --group admin fvo-admin --open --compare <folder>
 
 Reads the ForeverVO_Data* packs from --addons, else AUDITION_ADDONS, else the
 client's Interface/AddOns under WOW_DIR, and never writes anything. A line plays
@@ -31,10 +31,10 @@ from urllib.parse import quote
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 
-from tools.browse.catalog import Catalog, Filters
-from tools.browse.lines import Line, merge
-from tools.browse.packs import find_packs, read_tables
-from tools.browse.texts import annotate, load_texts, npc_names_of
+from tools.admin.catalog import Catalog, Filters
+from tools.admin.lines import Line, merge
+from tools.admin.packs import find_packs, read_tables
+from tools.admin.texts import annotate, load_texts, npc_names_of
 from tools.config import BETA_DIR, DATA_DIR
 
 ADDONS_DIR = BETA_DIR / "Interface" / "AddOns"
@@ -189,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     catalog = build_catalog(args.addons, args.compare)
     facets = catalog.facets()
     print(
-        f"fvo-browse: {facets['packs_found']} packs in {args.addons}, "
+        f"fvo-admin: {facets['packs_found']} packs in {args.addons}, "
         f"{facets['totals']['lines']} lines"
         + (
             f", {facets['totals']['with_compare']} with a take in {args.compare}"
@@ -198,14 +198,14 @@ def main(argv: list[str] | None = None) -> int:
         )
     )
     if not facets["packs_found"]:
-        print("fvo-browse: no packs there; set WOW_DIR or pass --addons")
+        print("fvo-admin: no packs there; set WOW_DIR or pass --addons")
     if not facets["has_classic"]:
         print(
-            "fvo-browse: no tools/data/bulk/classic.json, so Classic quests show no "
+            "fvo-admin: no tools/data/bulk/classic.json, so Classic quests show no "
             "text; run `uv run --no-group tts fvo-classicdb`"
         )
     url = f"http://{args.host}:{args.port}"
-    print(f"fvo-browse: {url}")
+    print(f"fvo-admin: {url}")
     if args.open:
         threading.Timer(1.0, webbrowser.open, [url]).start()
     uvicorn.run(

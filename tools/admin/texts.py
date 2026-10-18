@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from tools.browse.lines import EVENTS, Line, items
+from tools.admin.lines import EVENTS, Line, items
 from tools.config import DATA_DIR
 
 KINDS = ("quests", "gossip", "npcs")
