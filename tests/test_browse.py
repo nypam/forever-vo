@@ -712,3 +712,23 @@ def test_browse_does_not_import_the_pipeline():
     if sys.platform != "win32":
         found.discard("fcntl")  # the stdlib may load it on Linux; the pipeline never
     assert found == set()
+
+
+def test_quests_list_before_gossip_and_books(tmp_path):
+    make_pack(
+        tmp_path,
+        "ForeverVO_Data_X",
+        tables={
+            "Quests.lua": lua("quests", "{ [10] = { a=1.0 }, [9] = { a=1.0 } }"),
+            "Gossip.lua": lua(
+                "gossip", '{ [68] = { { f="68-0135d8e6", h="0135d8e6" } } }'
+            ),
+            "Books.lua": lua("books", '{ ["003512ce"] = { d=1.0 } }'),
+        },
+    )
+    assert [line.id for line in merge(find_packs(tmp_path))] == [
+        "q:9:accept",
+        "q:10:accept",
+        "g:68:0135d8e6",
+        "b:003512ce",
+    ]

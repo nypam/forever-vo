@@ -28,9 +28,10 @@
   main { padding: 0 20px 20px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
   th { position: sticky; top: 0; background: var(--panel); color: var(--dim); font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--line); }
-  td { padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+  td { padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.nowrap { white-space: nowrap; }
   tbody tr:hover { background: var(--panel); }
-  td.text { max-width: 36em; cursor: pointer; }
+  td.text { max-width: 36em; cursor: pointer; overflow-wrap: anywhere; }
   td.text div { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   td.text.open div { display: block; }
   .dim { color: var(--dim); }
@@ -135,13 +136,13 @@ function who(r) {
 function render(data) {
   total = data.total;
   rowsEl.innerHTML = data.rows.map((r, i) => `<tr>
-    <td>${esc(r.kind)}${r.variant ? `<br><span class="variant">${esc(r.variant)}</span>` : ""}</td>
+    <td class="nowrap">${esc(r.kind)}${r.variant ? `<br><span class="variant">${esc(r.variant)}</span>` : ""}</td>
     <td>${who(r)}</td>
-    <td>${r.zone ? esc(r.zone) : '<span class="dim">unknown</span>'}${r.level ? ` <span class="dim">· ${r.level}</span>` : ""}</td>
+    <td class="nowrap">${r.zone ? esc(r.zone) : '<span class="dim">unknown</span>'}${r.level ? ` <span class="dim">· ${r.level}</span>` : ""}</td>
     <td class="text"><div>${r.text ? esc(r.text) : '<span class="dim">text unknown</span>'}</div></td>
     <td>${esc(r.voice || "")}</td>
-    <td>${mmss(r.duration)}</td>
-    <td class="dim">${esc(r.pack.replace(/^ForeverVO_Data_/, ""))}</td>
+    <td class="nowrap">${mmss(r.duration)}</td>
+    <td class="dim nowrap">${esc(r.pack.replace(/^ForeverVO_Data_/, ""))}</td>
     <td>${r.missing ? '<span class="missing">file missing</span>' : `<button type="button" class="play" data-i="${i}" data-which="pack">▶ theirs</button>`}</td>
     <td>${r.compare_url ? `<button type="button" class="play cmp" data-i="${i}" data-which="cmp">▶ ${esc(facets.compare_label)}</button>` : ""}</td>
   </tr>`).join("") || `<tr><td colspan="9" class="dim">No lines match.</td></tr>`;

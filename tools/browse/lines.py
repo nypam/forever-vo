@@ -368,9 +368,16 @@ def lines_of(pack: Pack, tables: dict[str, Any]) -> list[Line]:
     return out
 
 
+KIND_ORDER = {"q": 0, "g": 1, "b": 2}
+
+
 def natural(text: str) -> list[Any]:
-    """Sort key that orders q:9 before q:10."""
-    return [int(s) if s.isdigit() else s for s in re.split(r"(-?\d+)", text)]
+    """Sort key: quests, then gossip, then books, and q:9 before q:10."""
+    head = KIND_ORDER.get(text.split(":", 1)[0], len(KIND_ORDER))
+    return [
+        head,
+        *(int(s) if s.lstrip("-").isdigit() else s for s in re.split(r"(-?\d+)", text)),
+    ]
 
 
 def merge(packs: list[Pack]) -> list[Line]:
