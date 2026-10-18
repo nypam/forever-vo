@@ -353,6 +353,10 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+admin = [
+    { name = "fastapi" },
+    { name = "uvicorn" },
+]
 dev = [
     { name = "fastapi" },
     { name = "httpx" },
@@ -387,6 +391,10 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+admin = [
+    { name = "fastapi" },
+    { name = "uvicorn" },
+]
 dev = [
     { name = "fastapi" },
     { name = "httpx" },

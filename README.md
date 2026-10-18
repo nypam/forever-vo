@@ -104,6 +104,56 @@ WOW_DIR="$HOME/Games/World of Warcraft" ./tools/run.sh audition
 AUDITION_ADDONS="$PWD/addons" ./tools/run.sh audition
 ```
 
+### The admin
+
+`fvo-admin` opens a local page (port 8766) over the whole library: every line
+the voice packs voice, and every line `capture.json` and `bulk/*.json` know as
+text but no pack voices yet (mostly progress text, which `fvo-generate` leaves
+out without `--progress`).
+
+- **Dashboard** (`/`): quests and lines known, voiced, text only, audio only,
+  NPCs, voices, by kind, level and zone. Every number links to exactly the lines
+  it counts.
+- **Lines** (`/lines`): filter by kind, status, pack, voice, zone, level, quest,
+  NPC or words. Each line plays the way the addon plays it, so a line with
+  stage directions plays part by part.
+- **NPC pages** (`/npc/<speaker>`): the NPC's voices and how many NPCs share
+  each one, its lines, and a soundboard of Blizzard's own recordings. The
+  soundboard plays its NPCSounds barks when its display is known, else the clips
+  behind its voice.
+- **Voice pages** (`/voice/<name>`, and the list at `/voices`): the clips its
+  reference is picked from (`configs/voices.sources.toml`), its settings as
+  configured, who uses it, and its longest lines.
+
+It reads the packs, `configs/` and `tools/data/`, and writes only gitignored
+caches. Blizzard clips are fetched from wago.tools the first time they play
+(`tools/data/casc/`, `tools/voices/raw/admin/`). It needs no GPU stack, so it
+runs on Windows too, and it finds the packs the way audition does
+(`--addons`, else `AUDITION_ADDONS`, else `WOW_DIR`).
+
+```sh
+uv run --no-group tts --group admin fvo-admin --open
+```
+
+```powershell
+# Windows: point WOW_DIR at the folder that holds _classic_beta_
+$env:WOW_DIR = "C:\Program Files (x86)\World of Warcraft"
+uv run --no-group tts --group admin fvo-admin --open
+```
+
+Classic quests' text, levels and NPC display IDs come from
+`tools/data/bulk/classic.json`. Run `uv run --no-group tts fvo-classicdb` once
+to write it. Until then those quests list and play, but show no text, and their
+NPCs' soundboards fall back to their voice's clips.
+
+`--compare <folder>` (or `FVO_COMPARE`) puts another pipeline's takes beside
+the packs' own. The folder is laid out like a pack's `Sounds/`, for example
+`Quests/<questID>-<accept|progress|complete>.mp3` and
+`Gossip/<speaker>-<hash>.mp3` (the hash is `tools/textkey.py`'s). A line whose
+file is there too gets a second play button. A `$G` line also pairs with a
+plain file when there is no `m-`/`f-` one. The folder and the library are read
+at startup, so restart after adding takes or captures.
+
 ### Audition on an AMD GPU
 
 The default `tts` group is the CUDA wheel. On AMD, audition uses the

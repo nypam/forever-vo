@@ -145,6 +145,13 @@ def parse_saved_variables(text: str) -> dict[str, Any]:
     return result
 
 
+def parse_value(text: str) -> Any:
+    """Parses the first Lua value in `text` (a table literal, string, number...).
+    For files that are not SavedVariables, such as a pack's generated
+    `pack.quests = {...}` tables, whose dotted names the tokeniser cannot read."""
+    return _Parser(text).value()
+
+
 def lua_string(s: str) -> str:
     """Quotes a Python string as a Lua string literal."""
     return (
